@@ -89,8 +89,16 @@ public interface UIConsts {
         String DB_STORE_FILES = "prefDbStoreHistory"; //$NON-NLS-1$
         String NO_PRIVILEGES = "prefNoPrivileges"; //$NON-NLS-1$
         String IGNORE_COLUMN_ORDER = "prefIgnoreColumnOrder"; //$NON-NLS-1$
+        String IGNORE_SEQUENCE_CACHE = "prefIgnoreSequenceCache"; //$NON-NLS-1$
+        String NO_ALTER_TABLE_ONLY = "prefNoAlterTableOnly"; //$NON-NLS-1$
+        String IGNORE_COLUMN_STATISTICS = "prefIgnoreColumnStatistics"; //$NON-NLS-1$
         String SIMPLIFY_VIEW = "prefSimplifyView"; //$NON-NLS-1$
         String ENABLE_BODY_DEPENDENCIES = "prefEnableBodyDependencies"; //$NON-NLS-1$
+        String PG_ROUTINE_BODY_SKIP_MATCHED_ANALYSIS = "pgRoutineBodySkipMatchedAnalysis"; //$NON-NLS-1$
+        String PG_CATALOG_CACHE_ROWS = "pgCatalogCacheRows"; //$NON-NLS-1$
+        String PROJECT_INDEX_EXCLUDED_SCHEMAS = "projectIndexExcludedSchemas"; //$NON-NLS-1$
+        String PROJECT_INDEX_INCREMENTAL_ADDED_FILES = "projectIndexIncrementalAddedFiles"; //$NON-NLS-1$
+        String PROJECT_UPDATED_FROM_DATABASE_ONLY = "projectUpdatedFromDatabaseOnly"; //$NON-NLS-1$
         String LAST_OPENED_LOCATION = "prefLastOpenedLocation"; //$NON-NLS-1$
         String CALL_COMMIT_COMMAND_AFTER_UPDATE = "callCommitCommandAfterUpdate"; //$NON-NLS-1$
         String LAST_CREATED_OBJECT_TYPE = "prefLastCreatedObjectType"; //$NON-NLS-1$
@@ -98,10 +106,14 @@ public interface UIConsts {
         String REUSE_OPEN_COMPARE_EDITOR = "reuseOpenCompareEditors"; //$NON-NLS-1$
         String IGNORE_CONCURRENT_MODIFICATION = "ignoreConcurrentModification"; //$NON-NLS-1$
         String PARALLEL_LOADING = "parallelLoading"; //$NON-NLS-1$
+        String GET_CHANGES_PARSER_WORKERS = "getChangesParserWorkers"; //$NON-NLS-1$
+        String PROJECT_INDEX_PARSER_WORKERS = "projectIndexParserWorkers"; //$NON-NLS-1$
         String PARSER_CACHE_CLEANING_INTERVAL = "parserCacheCleaningInterval"; //$NON-NLS-1$
         String HEAP_SIZE_WARNING = "heapSizeWarning"; //$NON-NLS-1$
         String FORMAT_OBJECT_CODE_AUTOMATICALLY = "formatObjectCodeAutomatically"; //$NON-NLS-1$
         String SIMPLIFY_NOT_NULL = "isSimplifyNotNull"; //$NON-NLS-1$
+        String GROUP_PARTITIONS_IN_TREE = "groupPartitionsInTree"; //$NON-NLS-1$
+        String NEST_PARTITIONS_UNDER_PARENT = "nestPartitionsUnderParent"; //$NON-NLS-1$
     }
 
     interface DB_UPDATE_PREF {

@@ -1209,6 +1209,12 @@
                 </contentExtension>
                 <contentExtension pattern="ru\.taximaxim\.codekeeper\.ui\.views\.navigator\.codekeeperLibrary">
                 </contentExtension>
+                <contentExtension pattern="ru\.taximaxim\.codekeeper\.ui\.views\.navigator\.codekeeperPartitionOrder">
+                </contentExtension>
+                <contentExtension pattern="ru\.taximaxim\.codekeeper\.ui\.views\.navigator\.codekeeperPartitionNesting">
+                </contentExtension>
+                <contentExtension pattern="ru\.taximaxim\.codekeeper\.ui\.views\.navigator\.codekeeperPartitionSections">
+                </contentExtension>
             </includes>
         </viewerContentBinding>
         <viewerActionBinding viewerId="org.eclipse.ui.navigator.ProjectExplorer">
@@ -1323,6 +1329,105 @@
                 </adapt>
             </triggerPoints>
         </navigatorContent>
+        <!--
+            Contributes nothing but an ordering. sortOnly="true" is what makes
+            the platform consult it for children the resource extension put in
+            the tree, and priority="highest" is what makes it win against the
+            resource extension's own sorter, which claims every IResource
+            parent at priority="low". Both were proven by mutation on
+            PartitionOrderStandTest; drop either and the folder goes back to
+            plain alphabetical. The parentExpression must exclude IFile
+            parents: the children of a .sql file are its own statements, and
+            their order belongs to DisabledSorter.
+        -->
+        <navigatorContent
+            activeByDefault="true"
+            icon="icons/app_icon16.png"
+            id="ru.taximaxim.codekeeper.ui.views.navigator.codekeeperPartitionOrder"
+            name="%navigator.partition.order.content"
+            priority="highest"
+            sortOnly="true">
+            <commonSorter class="ru.taximaxim.codekeeper.ui.views.navigator.PartitionAwareComparator">
+                <parentExpression>
+                    <and>
+                        <instanceof value="org.eclipse.core.resources.IFolder">
+                        </instanceof>
+                        <test
+                            property="org.eclipse.core.resources.projectNature"
+                            value="ru.taximaxim.codekeeper.ui.nature">
+                        </test>
+                    </and>
+                </parentExpression>
+            </commonSorter>
+        </navigatorContent>
+        <!--
+            Shows the sections of a table under the table, behind one grouping
+            node. priority="highest" is load-bearing twice over: it decides
+            which extension the framework asks first for getParent (a TreeSet
+            ordered by ascending sequence number, first non-null answer wins),
+            and the competitor is org.eclipse.ui.navigator.resourceContent at
+            priority="low", whose answer is the folder the file lives in. The
+            provider returns the new chain only for a file the filter below is
+            really taking out of that folder; anything else would give the
+            platform two routes to one resource and break "Show In" and
+            "Link with Editor". possibleChildren has to name both the grouping
+            node and the section files, or the chain upwards stops at the first
+            of them the framework cannot place.
+        -->
+        <navigatorContent
+            activeByDefault="true"
+            contentProvider="ru.taximaxim.codekeeper.ui.views.navigator.PartitionNestingContentProvider"
+            icon="icons/app_icon16.png"
+            id="ru.taximaxim.codekeeper.ui.views.navigator.codekeeperPartitionNesting"
+            labelProvider="ru.taximaxim.codekeeper.ui.views.navigator.PartitionNestingLabelProvider"
+            name="%navigator.partition.nesting.content"
+            priority="highest">
+            <triggerPoints>
+                <adapt type="org.eclipse.core.resources.IFile">
+                    <test
+                        property="org.eclipse.core.resources.extension"
+                        value="sql">
+                    </test>
+                    <test
+                        property="org.eclipse.core.resources.projectNature"
+                        value="ru.taximaxim.codekeeper.ui.nature">
+                    </test>
+                </adapt>
+            </triggerPoints>
+            <possibleChildren>
+                <or>
+                    <instanceof value="ru.taximaxim.codekeeper.ui.views.navigator.PartitionGroupNode">
+                    </instanceof>
+                    <adapt type="org.eclipse.core.resources.IFile">
+                        <test
+                            property="org.eclipse.core.resources.extension"
+                            value="sql">
+                        </test>
+                        <test
+                            property="org.eclipse.core.resources.projectNature"
+                            value="ru.taximaxim.codekeeper.ui.nature">
+                        </test>
+                    </adapt>
+                </or>
+            </possibleChildren>
+        </navigatorContent>
+        <!--
+            The other half. A commonFilter is a filter of the whole viewer, so
+            PartitionSectionFilter is asked about the section files under the
+            grouping node too and has to answer by the parent, not by the file.
+            activeByDefault="true" and visibleInUI="false" on purpose: the
+            filter is always consulted and decides nothing by itself, so that
+            the only switch is the pgCodeKeeper preference and there is no
+            second, contradicting one in "Customize View...".
+        -->
+        <commonFilter
+            activeByDefault="true"
+            class="ru.taximaxim.codekeeper.ui.views.navigator.PartitionSectionFilter"
+            description="%navigator.partition.sections.filter.description"
+            id="ru.taximaxim.codekeeper.ui.views.navigator.codekeeperPartitionSections"
+            name="%navigator.partition.sections.filter"
+            visibleInUI="false">
+        </commonFilter>
         <actionProvider
             class="ru.taximaxim.codekeeper.ui.views.navigator.NavigatorRootActionProvider"
             id="ru.taximaxim.codekeeper.ui.navigator.codekeeperRootActionProvider">

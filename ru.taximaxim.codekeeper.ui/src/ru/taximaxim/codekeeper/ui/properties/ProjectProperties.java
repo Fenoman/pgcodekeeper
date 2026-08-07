@@ -42,14 +42,18 @@ import ru.taximaxim.codekeeper.ui.Activator;
 import ru.taximaxim.codekeeper.ui.DatabaseType;
 import ru.taximaxim.codekeeper.ui.UIConsts;
 import ru.taximaxim.codekeeper.ui.UIConsts.DB_BIND_PREF;
+import ru.taximaxim.codekeeper.ui.UIConsts.PREF;
 import ru.taximaxim.codekeeper.ui.UIConsts.PROJ_PREF;
 import ru.taximaxim.codekeeper.ui.dbstore.DbInfo;
 import ru.taximaxim.codekeeper.ui.dbstore.DbMenuStorePicker;
 import ru.taximaxim.codekeeper.ui.dbstore.IStorePicker;
 import ru.taximaxim.codekeeper.ui.localizations.Messages;
+import ru.taximaxim.codekeeper.ui.pgdbproject.parser.PgDbParser;
 import ru.taximaxim.codekeeper.ui.prefs.PreferenceCategory;
 import ru.taximaxim.codekeeper.ui.prefs.PreferenceScope;
 import ru.taximaxim.codekeeper.ui.prefs.Preferences;
+import ru.taximaxim.codekeeper.ui.projectindex.ProjectIndexConfigurationDiagnostics;
+import ru.taximaxim.codekeeper.ui.projectindex.ProjectIndexSchemaExclusions;
 import ru.taximaxim.codekeeper.ui.settings.FieldEditorStore;
 import ru.taximaxim.codekeeper.ui.settings.ICustomFieldEditor;
 import ru.taximaxim.codekeeper.ui.utils.ProjectUtils;
@@ -71,6 +75,7 @@ public class ProjectProperties extends PropertyPage {
 
     private IEclipsePreferences prefs;
     private IEclipsePreferences dbBindPrefs;
+    private IProject project;
 
     private DatabaseType dbType;
 
@@ -79,7 +84,7 @@ public class ProjectProperties extends PropertyPage {
     @Override
     public void setElement(IAdaptable element) {
         super.setElement(element);
-        IProject project = element.getAdapter(IProject.class);
+        project = element.getAdapter(IProject.class);
         prefs = new ProjectScope(project).getNode(UIConsts.PLUGIN_ID.THIS);
         dbBindPrefs = new ProjectScope(project).getNode(DB_BIND_PREF.DB_BINDING);
         dbType = ProjectUtils.getDatabaseType(project);
@@ -185,8 +190,9 @@ public class ProjectProperties extends PropertyPage {
             .forEach(e -> {
                 var f = (ICustomFieldEditor<?>) e;
                 fieldEditorStore.add(f);
-                f.setValue(prefs);
             });
+
+        fieldEditorStore.loadProjectValues(prefs, Activator.getDefault().getPreferenceStore());
 
         fieldEditorStore.setEnable(overridePref);
 
@@ -215,6 +221,7 @@ public class ProjectProperties extends PropertyPage {
 
     @Override
     protected void performDefaults() {
+        String before = projectIndexConfigurationFingerprint();
         // overridable preferences
         btnEnableProjPref.setSelection(false);
         fieldEditorStore.performDefaults(Activator.getDefault().getPreferenceStore());
@@ -230,6 +237,7 @@ public class ProjectProperties extends PropertyPage {
         }
         try {
             fillPrefs();
+            invalidateProjectIndexIfChanged(before);
         } catch (BackingStoreException e) {
             setErrorMessage(
                     Messages.projectProperties_error_occurs_while_saving_properties.formatted(e.getLocalizedMessage()));
@@ -252,8 +260,16 @@ public class ProjectProperties extends PropertyPage {
 
     @Override
     public boolean performOk() {
+        String validationError = projectIndexValidationError();
+        if (validationError != null) {
+            setErrorMessage(validationError);
+            setValid(false);
+            return false;
+        }
+        String before = projectIndexConfigurationFingerprint();
         try {
             fillPrefs();
+            invalidateProjectIndexIfChanged(before);
             if (!inApply) {
                 activateEditor();
             }
@@ -285,6 +301,73 @@ public class ProjectProperties extends PropertyPage {
         dbBindPrefs.flush();
         setValid(true);
         setErrorMessage(null);
+    }
+
+    /**
+     * Refuses a schema exclusion the index could not read back, in the words
+     * the preference page uses for the same value.
+     * <p>
+     * This is the only thing that refuses it. The field carries a validator of
+     * its own, but nothing here gives that field a page to report to, so its
+     * verdict reaches no one; and the value it holds is written to the project
+     * node by {@code fillPrefs} the moment this returns null. What a value that
+     * gets through costs is not one refused build: the exclusions are hashed
+     * into the identity of an index of every database type, so the fingerprint
+     * of a project holding an unreadable one never matches anything, and every
+     * cycle re-reads it, fails to stamp an identity and falls back to a full
+     * build that fails the same way.
+     * <p>
+     * Which is why the database type is not asked. It was, and answered null
+     * for anything but PostgreSQL - from the days the index was PostgreSQL-only
+     * - while the field itself is offered to every dialect and the value is
+     * parsed for every dialect. The question that is asked instead is whether
+     * this page holds the field at all: {@link Preferences} built the fields
+     * above and is the one place that decides which of them a dialect gets, so
+     * a page that stopped showing this one would stop validating it, rather
+     * than ask {@code FieldEditorStore} for a value nobody put there.
+     */
+    private String projectIndexValidationError() {
+        if (!validatesProjectIndexExcludedSchemas(dbType)) {
+            return null;
+        }
+        String value = (String) fieldEditorStore.getValue(
+                PREF.PROJECT_INDEX_EXCLUDED_SCHEMAS);
+        return ProjectIndexSchemaExclusions.validate(value)
+                .map(error -> switch (error.reason()) {
+                case DOTTED ->
+                    Messages.GeneralPrefPage_project_index_excluded_schemas_invalid_dotted
+                            .formatted(error.lineNumber(), error.value());
+                case FILESYSTEM_UNSAFE ->
+                    Messages.GeneralPrefPage_project_index_excluded_schemas_invalid_filesystem
+                            .formatted(error.lineNumber(), error.value());
+                })
+                .orElse(null);
+    }
+
+    /**
+     * Whether this page holds the excluded-schemas field for a project of this
+     * type, and therefore has one to validate.
+     *
+     * @param dbType type of the project the page was opened on
+     * @return whether the field is among the ones built for it
+     */
+    static boolean validatesProjectIndexExcludedSchemas(DatabaseType dbType) {
+        return Preferences.getPreferencesForScope(PreferenceCategory.MAIN,
+                PreferenceScope.PROJECT, dbType).stream()
+                .anyMatch(preference -> PREF.PROJECT_INDEX_EXCLUDED_SCHEMAS
+                        .equals(preference.getPreferenceName()));
+    }
+
+    private String projectIndexConfigurationFingerprint() {
+        return PgDbParser.projectIndexConfigurationFingerprint(project);
+    }
+
+    private void invalidateProjectIndexIfChanged(String before) {
+        if (!before.equals(projectIndexConfigurationFingerprint())) {
+            PgDbParser.invalidateProjectIndexConfiguration(project,
+                    ProjectIndexConfigurationDiagnostics
+                            .ORIGIN_PROJECT_PROPERTIES);
+        }
     }
 
     private void activateEditor() {

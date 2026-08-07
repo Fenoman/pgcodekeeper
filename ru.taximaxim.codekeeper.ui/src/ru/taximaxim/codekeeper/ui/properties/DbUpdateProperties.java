@@ -93,8 +93,9 @@ public class DbUpdateProperties extends PropertyPage {
             .forEach(e -> {
                 var f = (ICustomFieldEditor<?>) e;
                 fieldEditorStore.add(f);
-                f.setValue(prefs);
             });
+
+        fieldEditorStore.loadProjectValues(prefs, Activator.getDefault().getPreferenceStore());
 
         fieldEditorStore.setEnable(overridePref);
         return panel;

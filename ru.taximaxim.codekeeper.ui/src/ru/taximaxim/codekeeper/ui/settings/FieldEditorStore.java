@@ -22,6 +22,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
+import org.eclipse.core.runtime.preferences.IEclipsePreferences;
 import org.eclipse.jface.preference.IPreferenceStore;
 
 import ru.taximaxim.codekeeper.ui.localizations.Messages;
@@ -37,6 +38,20 @@ public final class FieldEditorStore {
      */
     public void performDefaults(IPreferenceStore prefs) {
         list.forEach(e -> e.setValue(prefs));
+    }
+
+    /**
+     * Loads project overrides while preserving inheritance from global preferences
+     * for values that have not been explicitly stored in the project.
+     */
+    public void loadProjectValues(IEclipsePreferences projectPrefs, IPreferenceStore globalPrefs) {
+        list.forEach(e -> {
+            if (projectPrefs.get(e.getPreferenceName(), null) == null) {
+                e.setValue(globalPrefs);
+            } else {
+                e.setValue(projectPrefs);
+            }
+        });
     }
 
     public List<ICustomFieldEditor<?>> getFields() {

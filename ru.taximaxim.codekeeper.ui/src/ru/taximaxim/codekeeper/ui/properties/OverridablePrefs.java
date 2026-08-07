@@ -25,6 +25,7 @@ import org.eclipse.jface.preference.IPreferenceStore;
 import ru.taximaxim.codekeeper.ui.Activator;
 import ru.taximaxim.codekeeper.ui.UIConsts;
 import ru.taximaxim.codekeeper.ui.UIConsts.DB_UPDATE_PREF;
+import ru.taximaxim.codekeeper.ui.UIConsts.PREF;
 import ru.taximaxim.codekeeper.ui.UIConsts.PROJ_PREF;
 import ru.taximaxim.codekeeper.ui.prefs.AbstractPreference;
 import ru.taximaxim.codekeeper.ui.prefs.PreferenceCategory;
@@ -66,6 +67,9 @@ public class OverridablePrefs {
 
     public Object get(PreferenceCategory category, String preferenceName) {
         if (PreferenceCategory.MAIN == category) {
+            if (PREF.PROJECT_INDEX_EXCLUDED_SCHEMAS.equals(preferenceName)) {
+                return getString(preferenceName, isEnableProjPrefRoot);
+            }
             return getBoolean(preferenceName, isEnableProjPrefRoot);
         }
 

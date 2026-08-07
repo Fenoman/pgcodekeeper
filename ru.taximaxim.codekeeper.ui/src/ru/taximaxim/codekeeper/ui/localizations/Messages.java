@@ -233,6 +233,10 @@ public final class Messages extends NLS {
 
     public static String CommitDialog_applying_diff_tree_to_db;
 
+    public static String CommitDialog_depcy_set_incomplete_in_receive_only;
+
+    public static String CommitDialog_incomplete_depcy_expansion;
+
     public static String CommitDialog_privileges_must_be_saved;
 
     public static String CommitDialog_project_updater_job_finished;
@@ -483,6 +487,17 @@ public final class Messages extends NLS {
 
     public static String DependenciesProperties_error_save;
 
+    public static String PaneMarkLegend_leaving;
+    public static String PaneMarkLegend_leaving_hint;
+    public static String PaneMarkLegend_kept;
+    public static String PaneMarkLegend_kept_hint;
+    public static String PaneMarkLegend_kept_by;
+    public static String PaneMarkLegend_value;
+    public static String PaneMarkLegend_value_hint;
+    public static String PaneMarkLegend_unmigratable;
+    public static String PaneMarkLegend_unmigratable_hint;
+    public static String PaneMarkRuler_hint;
+
     public static String DiffPaneViewer_btn_switch;
     public static String DiffPaneViewer_project;
 
@@ -515,6 +530,8 @@ public final class Messages extends NLS {
 
     public static String DiffTableViewer_file;
 
+    public static String DiffTableViewer_depcy_unavailable_in_receive_only;
+
     public static String DiffTableViewer_error_creating_graph;
 
     public static String DiffTableViewer_error_reading_git_history;
@@ -524,6 +541,18 @@ public final class Messages extends NLS {
     public static String DiffTableViewer_filter_placeholder;
     public static String DiffTableViewer_get_changes;
     public static String DiffTableViewer_get_changes_custom;
+
+    public static String DiffTableViewer_hidden;
+    public static String DiffTableViewer_hidden_hint;
+    public static String DiffTableViewer_hidden_hint_columns;
+    public static String DiffTableViewer_hidden_hint_idle;
+    public static String DiffTableViewer_hidden_hint_more_rules;
+    public static String DiffTableViewer_hidden_hint_no_rule;
+    public static String DiffTableViewer_hidden_hint_retired_columns;
+    public static String DiffTableViewer_hidden_hint_rule;
+    public static String DiffTableViewer_hidden_nothing;
+    public static String DiffTableViewer_hidden_nothing_hint;
+    public static String DiffTableViewer_retired_columns;
 
     public static String DiffTableViewer_library;
 
@@ -788,6 +817,8 @@ public final class Messages extends NLS {
 
     public static String PgDbParser_error_loading_db;
 
+    public static String PgDbParser_project_index_rebuild_job;
+
     public static String PgDbParser_serialize_error;
 
     public static String PgImport_error_default_name;
@@ -894,6 +925,7 @@ public final class Messages extends NLS {
     public static String ProjectEditorDiffer_library_duplication_title;
 
     public static String ProjectEditorDiffer_no_differences;
+    public static String ProjectEditorDiffer_project_inputs_changed;
 
     public static String ProjectEditorDiffer_database;
 
@@ -906,6 +938,14 @@ public final class Messages extends NLS {
     public static String ProjectEditorDiffer_remote_db_error;
 
     public static String ProjectEditorDiffer_started_db_update;
+
+    public static String ProjectEditorDiffer_incomplete_routine_analysis_title;
+
+    public static String ProjectEditorDiffer_incomplete_routine_analysis_msg;
+
+    public static String ProjectEditorDiffer_recompute_full_analysis;
+
+    public static String ProjectEditorDiffer_script_needs_full_load;
 
     public static String ProjectEditorDiffer_started_project_update;
 
@@ -1043,17 +1083,106 @@ public final class Messages extends NLS {
 
     public static String GeneralPrefPage_ignore_column_order;
 
+    public static String GeneralPrefPage_ignore_column_statistics;
+
+    public static String GeneralPrefPage_ignore_column_statistics_tooltip;
+
+    public static String GeneralPrefPage_ignore_sequence_cache;
+
+    public static String GeneralPrefPage_ignore_sequence_cache_tooltip;
+
+    public static String GeneralPrefPage_no_alter_table_only;
+
+    public static String GeneralPrefPage_no_alter_table_only_tooltip;
+
+    public static String GeneralPrefPage_pg_catalog_cache_rows;
+
+    public static String GeneralPrefPage_pg_catalog_cache_rows_tooltip;
+
+    public static String GeneralPrefPage_project_index_excluded_schemas;
+
+    public static String GeneralPrefPage_project_index_excluded_schemas_tooltip;
+
+    public static String GeneralPrefPage_project_index_excluded_schemas_invalid_dotted;
+
+    public static String GeneralPrefPage_project_index_excluded_schemas_invalid_filesystem;
+
+    public static String GeneralPrefPage_group_partitions_in_tree;
+
+    public static String GeneralPrefPage_group_partitions_in_tree_tooltip;
+
+    public static String GeneralPrefPage_nest_partitions_under_parent;
+
+    public static String GeneralPrefPage_nest_partitions_under_parent_tooltip;
+
+    public static String PartitionGroupNode_label;
+
+    public static String PartitionGroupNode_description;
+
+    public static String GeneralPrefPage_project_index_incremental_added_files;
+
+    public static String GeneralPrefPage_project_index_incremental_added_files_tooltip;
+
+    public static String GeneralPrefPage_project_updated_from_database_only;
+
+    public static String GeneralPrefPage_project_updated_from_database_only_tooltip;
+
+    public static String GeneralPrefPage_pg_routine_body_skip_matched_analysis;
+
+    public static String GeneralPrefPage_pg_routine_body_skip_matched_analysis_tooltip;
+
     public static String GeneralPrefPage_show_full_code;
 
     public static String GeneralPrefPage_ignore_concurrent_modification;
 
     public static String GeneralPrefPage_use_parallel_load;
 
+    public static String GeneralPrefPage_get_changes_parser_workers;
+
+    public static String GeneralPrefPage_project_index_parser_workers;
+
+    public static String GeneralPrefPage_parser_workers_tooltip;
+
     public static String GeneralPrefPage_alert_if_heap_size_less_than_necessary;
 
     public static String GeneralPrefPage_time_to_clean_parser_cache;
 
     public static String GeneralPrefPage_clean_parser_cache;
+
+    public static String GeneralPrefPage_catalog_cache_group;
+
+    public static String GeneralPrefPage_catalog_cache_tooltip;
+
+    public static String GeneralPrefPage_catalog_cache_location;
+
+    public static String GeneralPrefPage_catalog_cache_size;
+    public static String GeneralPrefPage_analysis_cache_size;
+    public static String ReusableProjectComparison_store_job;
+    public static String GeneralPrefPage_analysis_cache_cleared;
+
+    public static String GeneralPrefPage_catalog_cache_size_calculating;
+
+    public static String GeneralPrefPage_catalog_cache_size_units;
+
+    public static String GeneralPrefPage_catalog_cache_size_job;
+
+    public static String GeneralPrefPage_catalog_cache_unavailable;
+
+    public static String GeneralPrefPage_catalog_cache_clear;
+
+    public static String GeneralPrefPage_catalog_cache_clear_confirm_title;
+
+    public static String GeneralPrefPage_catalog_cache_clear_confirm_message;
+
+    public static String GeneralPrefPage_catalog_cache_clear_job;
+
+    public static String GeneralPrefPage_catalog_cache_clear_done;
+
+    public static String GeneralPrefPage_catalog_cache_clear_kept;
+
+    public static String GeneralPrefPage_catalog_cache_clear_busy;
+
+    public static String GeneralPrefPage_catalog_cache_clear_empty;
 
     public static String GeneralPrefPage_format_object_code_automatically;
 
@@ -1068,6 +1197,50 @@ public final class Messages extends NLS {
     public static String GetChanges_select_source;
 
     public static String GetChanges_select_source_msg;
+
+    public static String GetChangesProgressSink_workspace_refresh;
+
+    public static String GetChangesProgressSink_project_index;
+
+    public static String GetChangesProgressSink_model_validate;
+
+    public static String GetChangesProgressSink_core_load;
+
+    public static String GetChangesProgressSink_core_load_project;
+
+    public static String GetChangesProgressSink_core_load_remote;
+
+    public static String GetChangesProgressSink_core_load_catalogs;
+
+    public static String GetChangesProgressSink_core_load_analyze_cold;
+    public static String GetChangesProgressSink_core_load_analyze_warm;
+    public static String GetChangesProgressSink_core_load_analyze_warm_disk;
+
+    public static String GetChangesProgressSink_core_load_finish;
+
+    public static String GetChangesProgressSink_diff_tree;
+
+    public static String GetChangesProgressSink_publish;
+
+    public static String ProjectBuildProgressSink_enumerate;
+
+    public static String ProjectBuildProgressSink_restore;
+
+    public static String ProjectBuildProgressSink_load;
+
+    public static String ProjectBuildProgressSink_load_files;
+
+    public static String ProjectBuildProgressSink_load_objects;
+
+    public static String ProjectBuildProgressSink_load_changed;
+
+    public static String ProjectBuildProgressSink_pack;
+
+    public static String ProjectBuildProgressSink_compact;
+
+    public static String ProjectBuildProgressSink_publish;
+
+    public static String ProjectBuildProgressSink_recheck;
 
     public static String GitUserReader_error_reading_local_changes;
 

@@ -25,8 +25,10 @@ import ru.taximaxim.codekeeper.ui.UIConsts;
 import ru.taximaxim.codekeeper.ui.UIConsts.DB_UPDATE_PREF;
 import ru.taximaxim.codekeeper.ui.UIConsts.FORMATTER_PREF;
 import ru.taximaxim.codekeeper.ui.UIConsts.PG_EDIT_PREF;
+import ru.taximaxim.codekeeper.ui.UIConsts.PREF;
 import ru.taximaxim.codekeeper.ui.UIConsts.SQL_EDITOR_PREF;
 import ru.taximaxim.codekeeper.ui.UIConsts.USAGE_REPORT_PREF;
+import ru.taximaxim.codekeeper.ui.settings.ParserWorkerDefaults;
 import ru.taximaxim.codekeeper.ui.sqledit.SQLEditorStatementTypes;
 import ru.taximaxim.codekeeper.ui.sqledit.SQLEditorSyntaxModel;
 
@@ -36,7 +38,7 @@ public final class PreferenceInitializer extends AbstractPreferenceInitializer {
     public void initializeDefaultPreferences() {
         IPreferenceStore store = Activator.getDefault().getPreferenceStore();
 
-        Preferences.initialize(store);
+        initializeGeneralDefaults(store);
 
         store.setDefault(PG_EDIT_PREF.EDITOR_UPDATE_ACTION, PG_EDIT_PREF.NO_ACTION);
         store.setDefault(PG_EDIT_PREF.SHOW_GIT_USER, true);
@@ -70,6 +72,30 @@ public final class PreferenceInitializer extends AbstractPreferenceInitializer {
         store.setDefault(FORMATTER_PREF.ADD_WHITESPACE_AFTER_OP, true);
 
         setSQLSyntaxColorDefaults(store);
+    }
+
+    static void initializeGeneralDefaults(IPreferenceStore store) {
+        initializeGeneralDefaults(store, ParserWorkerDefaults.defaultWorkers());
+    }
+
+    /**
+     * The parser worker defaults belong here and not in {@code
+     * plugin_customization.ini}: that file is read by the standalone product
+     * alone, so a value placed there leaves everyone running pgCodeKeeper as a
+     * plug-in inside their own Eclipse on the bundle default. Computed here,
+     * both deployments get the same tuning, and it scales with the machine
+     * instead of assuming the one a measurement ran on. See {@link
+     * ParserWorkerDefaults} for the formula.
+     *
+     * @param parserWorkers default worker count for both parser preferences
+     */
+    static void initializeGeneralDefaults(IPreferenceStore store,
+            int parserWorkers) {
+        Preferences.initialize(store);
+        store.setDefault(PREF.GET_CHANGES_PARSER_WORKERS, parserWorkers);
+        store.setDefault(PREF.PROJECT_INDEX_PARSER_WORKERS, parserWorkers);
+        store.setDefault(PREF.HEAP_SIZE_WARNING, true);
+        store.setDefault(PREF.PARSER_CACHE_CLEANING_INTERVAL, 10);
     }
 
     private void setSQLSyntaxColorDefaults(IPreferenceStore store) {
