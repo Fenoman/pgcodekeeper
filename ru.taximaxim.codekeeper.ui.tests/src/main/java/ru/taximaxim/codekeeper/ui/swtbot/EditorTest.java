@@ -24,7 +24,9 @@ import java.net.URISyntaxException;
 import java.util.Map;
 import java.util.function.IntPredicate;
 
+import org.eclipse.swtbot.swt.finder.waits.Conditions;
 import org.eclipse.swtbot.swt.finder.waits.DefaultCondition;
+import org.eclipse.swtbot.swt.finder.widgets.SWTBotShell;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -36,8 +38,9 @@ import ru.taximaxim.codekeeper.ui.swtbot.utils.IBotProvider;
 
 public class EditorTest extends AbstractSwtBotTest {
 
+    // The optimized PG path blocks GUI migration generation and does not create its folder.
     private static final Map<DatabaseType, Integer> EXPECTED_NODES_SIZE = Map.of(
-            DatabaseType.PG, 7,
+            DatabaseType.PG, 6,
             DatabaseType.MS, 10,
             DatabaseType.CH, 5
     );
@@ -72,8 +75,10 @@ public class EditorTest extends AbstractSwtBotTest {
         waitUntilLoadDiffTree(editor, IS_NOT_EMPTY);
         assertTreeRowCount(editor, IS_NOT_EMPTY);
 
-        selectAllAndApplyTo(Messages.DiffTableViewer_to_database);
-        checkMigrationScript("migration for " + dumpName);
+        if (DatabaseType.PG != dbType) {
+            selectAllAndApplyTo(Messages.DiffTableViewer_to_database);
+            checkMigrationScript("migration for " + dumpName);
+        }
 
         selectAllAndApplyTo(Messages.DiffTableViewer_to_project);
 
@@ -90,9 +95,20 @@ public class EditorTest extends AbstractSwtBotTest {
         assertTreeRowCount(editor, IS_NOT_EMPTY);
 
         selectAllAndApplyTo(Messages.DiffTableViewer_to_database);
-        checkMigrationScript("migration for " + emptyDumpName);
+        checkMigrationResult(dbType, "migration for " + emptyDumpName);
 
         assertEquals(EXPECTED_NODES_SIZE.get(dbType), getActualNodesByProjectName(projectName));
+    }
+
+    private void checkMigrationResult(DatabaseType dbType, String migrationName) {
+        if (DatabaseType.PG == dbType) {
+            SWTBotShell warning = BOT.shell(Messages.ProjectEditorDiffer_incomplete_routine_analysis_title);
+            warning.activate();
+            warning.bot().button("OK").click();
+            BOT.waitUntil(Conditions.shellCloses(warning));
+        } else {
+            checkMigrationScript(migrationName);
+        }
     }
 
     private void selectAllAndApplyTo(String target) {

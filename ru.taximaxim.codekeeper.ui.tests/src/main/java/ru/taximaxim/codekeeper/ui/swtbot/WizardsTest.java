@@ -23,8 +23,10 @@ import java.awt.AWTException;
 import java.io.IOException;
 import java.net.URISyntaxException;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.eclipse.swtbot.eclipse.finder.widgets.SWTBotEclipseEditor;
+import org.eclipse.swtbot.swt.finder.waits.DefaultCondition;
 import org.eclipse.swtbot.swt.finder.widgets.SWTBotTreeItem;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -85,7 +87,8 @@ public class WizardsTest extends AbstractSwtBotTest {
         selectDump(shell, emptyDumpName, 1);
         BOT.button("Next >").click();
 
-        BOT.sleep(ACTION_TIMEOUT);
+        waitForLabelContains(sourceIndex, dumpName);
+        waitForLabelContains(targetIndex, emptyDumpName);
         assertTrue(BOT.label(sourceIndex).getText().contains(dumpName));
         assertTrue(BOT.label(targetIndex).getText().contains(emptyDumpName));
 
@@ -96,6 +99,8 @@ public class WizardsTest extends AbstractSwtBotTest {
 
         BOT.shell(Messages.diffWizard_Diff).activate();
         BOT.button(Messages.DiffWizard_swap_sides).click();
+        waitForLabelContains(sourceIndex, emptyDumpName);
+        waitForLabelContains(targetIndex, dumpName);
         assertTrue(BOT.label(sourceIndex).getText().contains(emptyDumpName));
         assertTrue(BOT.label(targetIndex).getText().contains(dumpName));
 
@@ -104,5 +109,39 @@ public class WizardsTest extends AbstractSwtBotTest {
 
         BOT.shell(Messages.diffWizard_Diff).activate();
         BOT.button("Finish").click();
+    }
+
+    /**
+     * Waits until the label shows the expected text instead of reading it right
+     * away: the wizard fills both labels only when the comparison it runs in a
+     * forked thread is over, and the event loop keeps running meanwhile, so a
+     * plain read races the repaint and sees the previous side.
+     * <p>
+     * The text last seen is remembered while polling and reported on timeout, so
+     * that a failure says what was expected and what was shown. Re-reading the
+     * label in the failure message would risk throwing there and losing both.
+     *
+     * @param labelIndex
+     *            index of the label among the visible ones
+     * @param expected
+     *            the substring the label is expected to show
+     */
+    private void waitForLabelContains(int labelIndex, String expected) {
+        AtomicReference<String> lastSeenText = new AtomicReference<>("<label not found>");
+        BOT.waitUntil(new DefaultCondition() {
+
+            @Override
+            public boolean test() {
+                String text = BOT.label(labelIndex).getText();
+                lastSeenText.set(text);
+                return text.contains(expected);
+            }
+
+            @Override
+            public String getFailureMessage() {
+                return "The label by index " + labelIndex + " has not been updated. Current text: "
+                        + lastSeenText.get() + "; expected to contain: " + expected;
+            }
+        }, ACTION_TIMEOUT);
     }
 }
