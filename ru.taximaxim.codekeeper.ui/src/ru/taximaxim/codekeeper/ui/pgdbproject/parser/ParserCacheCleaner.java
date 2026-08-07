@@ -16,6 +16,7 @@
 package ru.taximaxim.codekeeper.ui.pgdbproject.parser;
 
 import java.util.concurrent.TimeUnit;
+import java.util.function.LongConsumer;
 
 import org.eclipse.jface.preference.IPreferenceStore;
 import org.eclipse.ui.IStartup;
@@ -24,7 +25,6 @@ import org.pgcodekeeper.core.database.ms.parser.MsParserUtils;
 import org.pgcodekeeper.core.database.pg.parser.PgParserUtils;
 
 import ru.taximaxim.codekeeper.ui.Activator;
-import ru.taximaxim.codekeeper.ui.Log;
 import ru.taximaxim.codekeeper.ui.UIConsts.PREF;
 
 /**
@@ -38,23 +38,35 @@ public class ParserCacheCleaner implements IStartup {
     @Override
     public void earlyStartup() {
         IPreferenceStore mainPrefs = Activator.getDefault().getPreferenceStore();
-        Thread.ofVirtual().start(() -> {
-            while (true) {
-                try {
-                    Thread.sleep(CHECK_INTERVAL);
-                } catch (InterruptedException e) {
-                    Log.log(e);
-                    Thread.currentThread().interrupt();
-                }
+        Thread.ofVirtual().start(() -> runCleanerLoop(mainPrefs, Thread::sleep,
+                ParserCacheCleaner::cleanParserCaches));
+    }
 
-                long cleaningInterval = TimeUnit.MINUTES
-                        .toMillis(mainPrefs.getInt(PREF.PARSER_CACHE_CLEANING_INTERVAL));
-                if (cleaningInterval != 0) {
-                    PgParserUtils.checkToClean(cleaningInterval);
-                    MsParserUtils.checkToClean(cleaningInterval);
-                    ChParserUtils.checkToCleanChParser(cleaningInterval);
-                }
+    static void runCleanerLoop(IPreferenceStore mainPrefs, Sleeper sleeper, LongConsumer cleaner) {
+        while (true) {
+            try {
+                sleeper.sleep(CHECK_INTERVAL);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
             }
-        });
+
+            long cleaningInterval = TimeUnit.MINUTES
+                    .toMillis(mainPrefs.getInt(PREF.PARSER_CACHE_CLEANING_INTERVAL));
+            if (cleaningInterval != 0) {
+                cleaner.accept(cleaningInterval);
+            }
+        }
+    }
+
+    private static void cleanParserCaches(long cleaningInterval) {
+        PgParserUtils.checkToClean(cleaningInterval);
+        MsParserUtils.checkToClean(cleaningInterval);
+        ChParserUtils.checkToCleanChParser(cleaningInterval);
+    }
+
+    @FunctionalInterface
+    interface Sleeper {
+        void sleep(long millis) throws InterruptedException;
     }
 }

@@ -137,7 +137,20 @@ public final class ProjectUtils {
     }
 
     public static List<String> getProjectDirNames(IProject project) {
-        var dbType = getDatabaseType(project);
+        return getProjectDirNames(project, getDatabaseType(project));
+    }
+
+    /**
+     * Resolves project directories without replacing an unreadable DBMS nature
+     * with the PostgreSQL default.
+     */
+    public static List<String> getProjectDirNamesChecked(IProject project)
+            throws CoreException {
+        return getProjectDirNames(project, getDatabaseTypeChecked(project));
+    }
+
+    private static List<String> getProjectDirNames(IProject project,
+            DatabaseType dbType) {
         var workDirs = createWorkDirs(dbType, AbstractWorkDirs.resolveAltDirsFile(getPath(project)));
         return getDefaultTopLevelDirNames(workDirs);
     }
@@ -204,16 +217,22 @@ public final class ProjectUtils {
 
     public static DatabaseType getDatabaseType(IProject proj) {
         try {
-            if (proj.exists()) {
-                if (proj.hasNature(NATURE_MS)) {
-                    return DatabaseType.MS;
-                }
-                if (proj.hasNature(NATURE_CH)) {
-                    return DatabaseType.CH;
-                }
-            }
+            return getDatabaseTypeChecked(proj);
         } catch (CoreException e) {
             Log.log(e);
+        }
+        return DatabaseType.PG;
+    }
+
+    private static DatabaseType getDatabaseTypeChecked(IProject proj)
+            throws CoreException {
+        if (proj.exists()) {
+            if (proj.hasNature(NATURE_MS)) {
+                return DatabaseType.MS;
+            }
+            if (proj.hasNature(NATURE_CH)) {
+                return DatabaseType.CH;
+            }
         }
         return DatabaseType.PG;
     }
