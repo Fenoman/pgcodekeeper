@@ -57,8 +57,7 @@ public class SQLEditorHyperLinkDetector extends AbstractHyperlinkDetector {
 
         for (ObjectLocation obj : parser.getObjsForEditor(editor.getEditorInput())) {
             if (offset >= obj.getOffset() && offset < (obj.getOffset() + obj.getObjLength())) {
-                Stream<IHyperlink> stream = parser.getAllObjReferences()
-                        .filter(obj::compare)
+                Stream<IHyperlink> stream = parser.getReferencesForObj(obj)
                         .filter(def -> {
                             LocationType type = def.getLocationType();
                             if (type == LocationType.DEFINITION) {

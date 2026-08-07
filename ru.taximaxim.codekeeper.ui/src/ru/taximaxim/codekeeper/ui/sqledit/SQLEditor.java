@@ -153,6 +153,7 @@ implements IResourceChangeListener, ITextErrorReporter {
     private PgDbParser parser;
     private DatabaseType dbType = DatabaseType.PG;
     private boolean isLargeFile;
+    private boolean ownParser;
 
     private Annotation[] occurrenceAnnotations = null;
 
@@ -478,8 +479,28 @@ implements IResourceChangeListener, ITextErrorReporter {
 
     private PgDbParser createNewParser(IResource res) throws InterruptedException, IOException, CoreException {
         PgDbParser pgDbParser = new PgDbParser();
+        ownParser = true;
         refreshParser(pgDbParser, res, null);
         return pgDbParser;
+    }
+
+    /**
+     * Whether this editor holds a parser of its own, knowing nothing but the
+     * file it was opened on - which is every file no pgCodeKeeper project
+     * claims as one of its objects, the ones outside a project and the ones
+     * inside it but outside its object directories alike.
+     * <p>
+     * It is what allows the statement under the caret to be analyzed out of
+     * the buffer for the completion: the records such an analysis leaves
+     * cannot reach a project index, a comparison or a migration script,
+     * because this editor's parser is not the project's and holds no index at
+     * all. An editor sharing the project's parser is answered by the project
+     * and reads no buffer.
+     *
+     * @return true when this editor parses nothing but its own file
+     */
+    boolean parsesOnlyItsOwnBuffer() {
+        return ownParser;
     }
 
     void refreshParser() {
@@ -495,6 +516,22 @@ implements IResourceChangeListener, ITextErrorReporter {
 
     /**
      * Use only for non-project parsers
+     * <p>
+     * Every caller guards on {@code !ProjectUtils.isInProject(res)}, which
+     * answers "in a pgCodeKeeper project AND under one of its object
+     * directories", while the branch below asks only the first half. A file
+     * inside such a project but under any other directory - OmniX keeps some
+     * 1600 of them under MIGRATION and Scripts - therefore passes both and
+     * reaches {@code getObjFromProjFile}.
+     * <p>
+     * That stays a single-file update because the parser handed in is always
+     * the private one this editor created for a file it does not consider its
+     * project's: its storage is a plain one, so the update parses the opened
+     * file and nothing else. Hand a parser holding a packed index in here and
+     * the same call prepares a whole project index through the shared
+     * coordinator instead - a second writer beside the builder. See
+     * {@code EditorOutsideProjectDirsIndexTest}.
+     *
      * @param {@link IFileEditorInput} {@link IResource} or null
      * @return true if refresh was triggered successfully
      */
@@ -502,8 +539,7 @@ implements IResourceChangeListener, ITextErrorReporter {
             throws InterruptedException, IOException {
         checkFileSize();
         if (isLargeFile()) {
-            parser.clear();
-            parser.notifyListeners();
+            parser.clearAndNotify();
             return;
         }
 
