@@ -17,6 +17,7 @@ package ru.taximaxim.codekeeper.ui.pgdbproject.parser;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
 import org.pgcodekeeper.core.database.api.loader.ILoader;
 import org.pgcodekeeper.core.database.api.schema.IDatabase;
@@ -32,6 +33,7 @@ public class StubDatabaseLoader implements ILoader {
 
     private final IDatabase db;
     private final String databaseName;
+    private final ISettings settings;
 
     /**
      * Creates a stub loader backed by the given database.
@@ -42,6 +44,20 @@ public class StubDatabaseLoader implements ILoader {
     public StubDatabaseLoader(IDatabase db, String databaseName) {
         this.db = db;
         this.databaseName = databaseName;
+        this.settings = null;
+    }
+
+    /**
+     * Creates a display adapter for a model loaded by the comparison factory API.
+     *
+     * @param db           the pre-loaded database
+     * @param databaseName a human-readable source name
+     * @param settings     final comparison settings shared by both display sides
+     */
+    public StubDatabaseLoader(IDatabase db, String databaseName, ISettings settings) {
+        this.db = db;
+        this.databaseName = databaseName;
+        this.settings = Objects.requireNonNull(settings, "settings"); //$NON-NLS-1$
     }
 
     @Override
@@ -66,11 +82,16 @@ public class StubDatabaseLoader implements ILoader {
 
     @Override
     public ISettings getSettings() {
-        throw new IllegalStateException();
+        if (settings == null) {
+            throw new IllegalStateException();
+        }
+        return settings;
     }
 
     @Override
     public List<Object> getErrors() {
-        return Collections.emptyList();
+        return settings == null
+                ? Collections.emptyList()
+                : Collections.unmodifiableList(settings.getErrors());
     }
 }

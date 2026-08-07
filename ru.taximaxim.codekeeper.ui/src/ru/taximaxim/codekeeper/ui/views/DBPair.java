@@ -15,9 +15,24 @@
  *******************************************************************************/
 package ru.taximaxim.codekeeper.ui.views;
 
+import org.pgcodekeeper.core.api.ComparisonDepth;
 import org.pgcodekeeper.core.database.api.loader.ILoader;
 import org.pgcodekeeper.core.settings.ISettings;
 
-public record DBPair(ILoader dbProject, ILoader dbRemote, ISettings settings) {
+/**
+ * The comparison a workbench selection event carries to whichever view or
+ * pane wants to react to it - {@link DepcyGraphView} chief among them.
+ *
+ * @param depth how deeply {@code dbProject}/{@code dbRemote} were loaded, so a
+ *              consumer can tell a structurally loaded comparison - which
+ *              never resolved a dependency edge - from an ordinary one that
+ *              simply has none. Always the depth of the comparison this exact
+ *              pair was built from, not a preference read fresh by whoever
+ *              constructs it: {@link ru.taximaxim.codekeeper.ui.editors.ProjectEditorDiffer}
+ *              builds one instance from a not-yet-published candidate
+ *              comparison whose depth can differ from the editor's own
+ *              currently displayed one.
+ */
+public record DBPair(ILoader dbProject, ILoader dbRemote, ISettings settings, ComparisonDepth depth) {
 
 }
