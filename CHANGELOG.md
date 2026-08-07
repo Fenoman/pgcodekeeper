@@ -7,11 +7,54 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
 
+## [15.2.0-neo1] - 2026-08-12
+
 ### Added
+
+- A project is now indexed once and the index is kept on disk, so opening a workspace no longer means re-reading and re-parsing every file. Hover documentation, the file outline, code completion and object search answer from the index immediately after a restart.
+- Saving a file, or pulling a day's worth of changes, updates the project index only for the files that moved. An index the working tree has left behind is repaired from the list of files that diverged instead of being rebuilt whole, and the build reports which files those were and why it chose the path it took. A file that fails to parse costs the repair of that one file and its error markers rather than a rebuild, a build that is cancelled or overtaken by a newer state of the workspace leaves the index in place for the next one, and applying a project preference file that changes no value keeps it as well, because one build works by one reading of the configuration from the enumeration of files to the publication of the result.
+- A schema can be kept out of the project index (`Window -> Preferences -> pgCodeKeeper`, and per project in `Project -> Properties -> pgCodeKeeper`): one exact name per line, in a project of any database type. Comparison and migration generation are unaffected; what an excluded schema loses is hover documentation and the file outline. A name no build could read back is refused as it is entered, and a change made workspace-wide reaches the editors that are already open.
+- A batch that adds files can be reindexed incrementally instead of costing a full rebuild of the project index (`Window -> Preferences -> pgCodeKeeper`, and per project). The setting is off by default and applies only when the addition provably cannot disturb what the index already holds; anything else, and any removal of a file, still falls back to a full build. The index is built to match the setting, so switching it costs one full build.
+- The number of parser workers can be set separately for a `Get changes` run and for project indexing (`Window -> Preferences -> pgCodeKeeper`). A value entered there is a workspace value and always wins; left alone, each of the two scales with the machine.
+- A repeated comparison against the same database reuses the analyzed project and the catalog snapshot of the previous run. Reuse is refused and everything is loaded again whenever the project, the settings or the connection cannot be proven unchanged, so a stale model can never reach a migration script.
+- A comparison of a PostgreSQL project no longer analyzes the body of a function or a procedure whose two sides match, which is what makes a repeated comparison faster. The setting is on by default and can be turned off globally, for one project, or for a single `Get changes with presets...` run. A migration script is never built from a comparison loaded that way: generating one offers to recompute the changes once with full analysis without changing a saved setting, and applying changes from such a comparison says in the dialog that dependency expansion may be incomplete.
+- Added a mode for a project that only receives changes from the database (`Project -> Properties -> pgCodeKeeper`, and the same setting workspace-wide). Such a project is compared without dependency analysis and is not indexed in the background, which is what makes it fast. A migration script is still built from a fully analyzed comparison, so it is identical to the one the mode switched off would produce.
+- The comparison pane now marks every line no migration will carry: a background behind the columns an ignore rule names, a letter in the margin beside a line the comparison passes over, and a legend above the pane that explains each mark and names the columns it applies to. The legend also names a column collation no migration script can express, because that difference never goes away.
+- Beside the count of compared objects the editor now says how much the ignore rules held back, which rules fired and on what. A rule that quietly stopped matching no longer looks exactly like a rule that is working.
+- The project tree orders the sections of a partitioned table below the tables of their folder, and can also show them under the table itself. The ordering is on by default and moves nothing: a section keeps its folder and its path and only changes which row it is on. Nesting is off by default, because it does take a section out of the folder it lives in. A folder holding two thousand sections becomes the eighty files anyone actually edits, with each family of sections one click away.
+- Code completion: typing a dot after a table or an alias in the SQL editor offers the columns of that relation, including an alias a `FROM` clause has only declared and an alias in a stand-alone SQL file that belongs to no project. The relation is looked up by key rather than by scanning every definition the project holds, so the size of the project does not decide what a keystroke costs. A text shorter than a trigram no longer asks for object completion at all, in every implementation alike, so what is offered does not depend on whether the project has an index; keywords and templates are unaffected.
+- A project build and a `Get changes` run now report which phase they are in and how far it has got, instead of a bar that never moves.
+- Added three comparison settings: leave the cache of a sequence out of the difference, leave the statistics target of a column out of the difference, and drop the `ONLY` keyword that a TimescaleDB hypertable rejects. All three are off by default and are offered in `Window -> Preferences -> pgCodeKeeper`, in the project properties, in the `Diff wizard` and for a single `Get changes with presets...` run. The sequence cache applies to PostgreSQL and MS SQL, the other two to PostgreSQL alone.
+- Added cache management to `Window -> Preferences -> pgCodeKeeper`: the folders of the catalog cache and of the analyzed model cache, the size of each measured in the background, and one button that clears both and reports how much each freed.
+- The timings of a build and of a comparison are written to a size-bounded performance log of their own in the workspace metadata, so they stay readable while the standalone application keeps its error log at warning level.
+- The standalone application writes a heap dump when it runs out of memory. The directory is created under the workspace metadata and checked writable at startup, because the working directory the virtual machine would use instead is read-only before startup finishes and inside the application bundle afterwards; the performance log says whether a dump can be written at all.
+- The standalone application is now built and published for Linux on Apple silicon as well.
 
 ### Changed
 
+- The background project index is no longer PostgreSQL-only: a MS SQL or ClickHouse project is indexed, restored after a restart and repaired incrementally exactly as a PostgreSQL one is, so hover documentation and the file outline no longer wait for a full parse of the project. The index reads a file back with the parser of the type the project is, and a measurement shows it holds what a full load holds. The schema exclusion setting and the incremental-added-files setting are offered to every project type for the same reason. Carrying a whole analyzed model from one comparison to the next remains PostgreSQL-only, because only PostgreSQL has a loader that replays a stored analysis.
+- Enabled persistent PostgreSQL catalog row caching by default in Eclipse to reduce traffic during repeated comparisons. The cache survives application restarts when the same workspace is used and remains user-configurable.
+- Parser worker defaults now scale with the machine and are the same in the standalone applications and in the Eclipse plug-in: half of the available processors, at least two and at most eight. The tuning was applied by the standalone product only, so the plug-in installed into another Eclipse never received it.
+- Raised the standalone maximum heap cap to 4 GiB while retaining a 256 MiB initial heap; the maximum is not allocated eagerly.
+- Every standalone archive now carries the Java runtime it needs. Only the macOS archives did, so the Windows and Linux ones ran on whatever Java the machine happened to have installed.
+- The standalone application notices the files that Git and external editors write and refreshes the workspace itself, so the project index and the editors see them without a manual refresh. A plug-in installed into somebody else's Eclipse keeps that Eclipse's own setting, because the switch decides the behaviour of every project in the workspace and not only of pgCodeKeeper ones.
+- The developer's update site is no longer part of the delivery: neither the standalone application nor the plug-in installed into Eclipse offers it. The Eclipse repository the application does offer names one release train instead of whatever `latest` resolves to on the day of the update.
+- Both sides of the comparison pane are rendered from one answer, and the children of an object are ordered by type and then by name. A database returns indexes and constraints in catalog order while a project returns them in file order, which was reported as a difference where the two states were identical.
+- Clearing a name filter over a large comparison is no longer slow: the object table pays for match highlighting only while a filter is set. Over eleven thousand objects, clearing a filter that had matched one of them took about a minute with the window unresponsive; it now takes a fraction of a second, and filling the table after `Get changes` is twenty times faster.
+- The job that rebuilds a whole project index is shown in the progress view and names the project it is rebuilding, instead of running hidden for the better part of a minute.
+- The tooltip of the excluded-schemas setting says what excluding a schema actually costs: the index is what answers hover documentation and the file outline, so an excluded schema stops being explainable in the editor.
+
 ### Fixed
+
+- Preserved global preference values when project overrides have no explicit value, so saving project properties cannot silently undo a global opt-out.
+- Every writer of project files is handed the rules the comparison hid by. `Apply to project`, `Quick update` and the comment editor assembled those rules separately or not at all, so pressing `Apply to project` wrote into a table's file the very columns a `type=COLUMN` rule had just hidden from the tree.
+- Creating a project from a database goes through the export that applies the project's ignore rules, so a directory that already carries a rules file, and the workspace-wide list, are honoured from the first file written.
+- The ignore lists are assembled once, before a comparison runs. The workspace-wide list, the lists a database connection carries and the extra lists configured for the project reached the difference table alone, so the tree behind it was built without them.
+- The comparison pane no longer renders children that an ignore rule has taken out of the comparison, and a hidden column is no longer counted as a change of its table.
+- The dependency graph view says why it can show nothing instead of showing an empty graph, and clears its status line on every path out.
+- The warning in the commit dialog wraps instead of widening the dialog to fit it.
+- The standalone application keeps the workspace state it supports across an upgrade; only the persisted elements of features it does not ship are removed.
+- An edit made to the project while a comparison is running is reported as such and the comparison is marked stale at once, instead of surfacing later as an unrelated error.
 
 ## [15.3.0] - 2026-08-10
 
@@ -22,6 +65,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 ### Fixed
 
 - Fixed a conflict when reading a schematic file when processing individual project files.
+
 
 ## [15.2.0] - 2026-08-10
 
