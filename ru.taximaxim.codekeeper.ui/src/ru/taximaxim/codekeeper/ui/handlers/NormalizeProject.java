@@ -59,6 +59,7 @@ import ru.taximaxim.codekeeper.ui.dialogs.ProjectNormalizationDialog;
 import ru.taximaxim.codekeeper.ui.libraries.LibraryUtils;
 import ru.taximaxim.codekeeper.ui.localizations.Messages;
 import ru.taximaxim.codekeeper.ui.pgdbproject.PgDbProject;
+import ru.taximaxim.codekeeper.ui.pgdbproject.WholeProjectExport;
 import ru.taximaxim.codekeeper.ui.settings.UISettings;
 import ru.taximaxim.codekeeper.ui.utils.ProjectUtils;
 import ru.taximaxim.codekeeper.ui.utils.UIMonitor;
@@ -119,8 +120,11 @@ public final class NormalizeProject extends AbstractHandler {
                     mon.newChild(1).subTask(Messages.NormalizeProject_exporting_project);
                     var updaterSettings = new UISettings(proj.getProject());
 
-                    provider.getProjectUpdater(db, null, null, projectPath, false, updaterSettings)
-                            .updateFull(projectOnly, currentWorkDirs);
+                    // the source is the project itself, so the rules it hides by
+                    // must not be applied: what they hid would be deleted from
+                    // the files of the project that declares it
+                    WholeProjectExport.relayout(provider, db, projectPath, projectOnly,
+                            currentWorkDirs, updaterSettings);
                 } catch (IOException ex) {
                     return new Status(IStatus.ERROR, PLUGIN_ID.THIS,
                             Messages.NormalizeProject_error_while_updating_project, ex);

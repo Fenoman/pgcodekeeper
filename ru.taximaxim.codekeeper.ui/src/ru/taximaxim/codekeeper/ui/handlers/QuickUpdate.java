@@ -77,6 +77,7 @@ import ru.taximaxim.codekeeper.ui.localizations.Messages;
 import ru.taximaxim.codekeeper.ui.pgdbproject.PgDbProject;
 import ru.taximaxim.codekeeper.ui.pgdbproject.parser.StubDatabaseLoader;
 import ru.taximaxim.codekeeper.ui.propertytests.QuickUpdateJobTester;
+import ru.taximaxim.codekeeper.ui.settings.ProjectIgnoreLists;
 import ru.taximaxim.codekeeper.ui.settings.UISettings;
 import ru.taximaxim.codekeeper.ui.sqledit.SQLEditor;
 import ru.taximaxim.codekeeper.ui.utils.ProjectUtils;
@@ -184,6 +185,13 @@ class QuickUpdateJob extends SingletonEditorJob {
                 Collections.emptyList(), Collections.emptyList(), Collections.emptyList(),
                 LibraryUtils.META_PATH);
 
+        // This is the (ILoader, ILoader, ISettings) overload, which predates
+        // ComparisonDepth and always calls loadAndAnalyze() on both sides
+        // (Utils.loadDatabases) - it cannot go through the receive-only
+        // mode's structural path at all, whatever the project's preference
+        // says. The Differ built below from this tree therefore never needs
+        // the reload-before-script guard diff() has; there is nothing here
+        // for it to guard against.
         TreeElement treeFull = PgCodeKeeperApi.createTree(dbRemote, dbProject, settings);
 
         String filePath = file.getLocation().toFile().toPath().toString();
@@ -201,6 +209,8 @@ class QuickUpdateJob extends SingletonEditorJob {
         }
 
         String timezone = proj.getPrefs().get(PROJ_PREF.TIMEZONE, Consts.UTC);
+        // treeFull is always built from a fully analyzed model - see the
+        // comment on its creation above - so no depth check belongs here.
         Differ differ = new Differ(dbRemote.getDatabase(), dbProject.getDatabase(), treeFull, timezone,
                 proj.getProject(), null, dbType, settings);
         differ.run(monitor.newChild(1));
@@ -248,8 +258,14 @@ class QuickUpdateJob extends SingletonEditorJob {
         checkFileModified();
 
         monitor.newChild(1).subTask(Messages.QuickUpdate_updating_project);
+        // The writer of project files answers to the ignore rules, and the
+        // database of this run carries lists of its own, so they are assembled
+        // exactly the way the project editor assembles them.
         provider.getProjectUpdater(dbRemote.getDatabase(), dbProject.getDatabase(), checkedAfter,
-                proj.getPathToProject(), false, new UISettings(proj.getProject())).updatePartial();
+                proj.getPathToProject(), false,
+                UISettings.forExport(proj.getProject(),
+                        ProjectIgnoreLists.read(proj.getProject(), null, dbInfo)))
+                .updatePartial();
 
         file.refreshLocal(IResource.DEPTH_INFINITE, monitor.newChild(1));
     }

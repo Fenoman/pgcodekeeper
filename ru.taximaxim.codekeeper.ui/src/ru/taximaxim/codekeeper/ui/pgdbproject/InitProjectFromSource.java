@@ -34,6 +34,7 @@ import ru.taximaxim.codekeeper.ui.database.base.jdbc.IDbInfoConnector;
 import ru.taximaxim.codekeeper.ui.dbstore.DbInfo;
 import ru.taximaxim.codekeeper.ui.localizations.Messages;
 import ru.taximaxim.codekeeper.ui.pgdbproject.parser.StubDatabaseLoader;
+import ru.taximaxim.codekeeper.ui.settings.ProjectIgnoreLists;
 import ru.taximaxim.codekeeper.ui.settings.UISettings;
 import ru.taximaxim.codekeeper.ui.utils.UIMonitor;
 
@@ -77,9 +78,12 @@ public final class InitProjectFromSource implements IRunnableWithProgress {
         IDatabase db = loader.loadAndAnalyze();
 
         pm.newChild(25).subTask(Messages.initProjectFromSource_exporting_db_model);
-        var provider = dbType.getDatabaseProvider();
-        var settings = new UISettings(proj.getProject(), null, dbType);
-        provider.getProjectUpdater(db, null, null, proj.getPathToProject(), false, settings).updateFull(false);
+        // the source is a database, so the rules the project hides by apply -
+        // including those of the very connection the objects are read from, the
+        // way every other writer of project files assembles them
+        var project = proj.getProject();
+        var settings = UISettings.forExport(project, ProjectIgnoreLists.read(project, null, dbInfo));
+        WholeProjectExport.fromDatabase(dbType.getDatabaseProvider(), db, proj.getPathToProject(), settings);
     }
 
     private ILoader createLoader(SubMonitor monitor) {

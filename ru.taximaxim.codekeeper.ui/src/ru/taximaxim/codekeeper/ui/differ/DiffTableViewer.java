@@ -36,7 +36,10 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.regex.Matcher;
@@ -60,6 +63,7 @@ import org.eclipse.jface.action.IStatusLineManager;
 import org.eclipse.jface.action.MenuManager;
 import org.eclipse.jface.action.Separator;
 import org.eclipse.jface.action.ToolBarManager;
+import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.jface.fieldassist.ContentProposalAdapter;
 import org.eclipse.jface.fieldassist.SimpleContentProposalProvider;
 import org.eclipse.jface.fieldassist.TextContentAdapter;
@@ -106,13 +110,17 @@ import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.Text;
 import org.eclipse.swt.widgets.Tree;
 import org.eclipse.ui.ISharedImages;
+import org.pgcodekeeper.core.api.ComparisonDepth;
 import org.pgcodekeeper.core.database.api.loader.ILoader;
 import org.pgcodekeeper.core.database.api.schema.DbObjType;
 import org.pgcodekeeper.core.database.api.schema.IDatabase;
 import org.pgcodekeeper.core.database.api.schema.IStatement;
 import org.pgcodekeeper.core.ignorelist.IgnoreList;
 import org.pgcodekeeper.core.library.LibrarySource;
+import org.pgcodekeeper.core.model.difftree.ColumnVisibility;
 import org.pgcodekeeper.core.model.difftree.DiffTree;
+import org.pgcodekeeper.core.model.difftree.HiddenObjects;
+import org.pgcodekeeper.core.model.difftree.HiddenObjects.Report;
 import org.pgcodekeeper.core.model.difftree.TreeElement;
 import org.pgcodekeeper.core.model.difftree.TreeElement.DiffSide;
 import org.pgcodekeeper.core.model.difftree.TreeFlattener;
@@ -124,6 +132,7 @@ import ru.taximaxim.codekeeper.ui.Activator;
 import ru.taximaxim.codekeeper.ui.AggregatingListener;
 import ru.taximaxim.codekeeper.ui.DatabaseType;
 import ru.taximaxim.codekeeper.ui.Log;
+import ru.taximaxim.codekeeper.ui.PerformanceTelemetry;
 import ru.taximaxim.codekeeper.ui.ProjectIcon;
 import ru.taximaxim.codekeeper.ui.UIConsts;
 import ru.taximaxim.codekeeper.ui.UIConsts.PG_EDIT_PREF;
@@ -172,6 +181,7 @@ public class DiffTableViewer extends Composite {
     private final DiffContentProvider contentProvider = new DiffContentProvider();
     private final CheckStateProvider checkProvider;
     private final TableViewerComparator comparator = new TableViewerComparator();
+    private final GitUserLoadCoordinator gitUserLoads = new GitUserLoadCoordinator();
     private Set<TreeElement> tables;
     private IStructuredSelection oldSelection;
     private IStructuredSelection newSelection;
@@ -180,6 +190,15 @@ public class DiffTableViewer extends Composite {
     private final Button useRegEx;
     private Label lblObjectCount;
     private Label lblCheckedCount;
+
+    /**
+     * How much of the comparison the ignore rules are holding back, see
+     * {@link HiddenObjectsNote}. Beside the filter rather than in the status
+     * line, because the status line of this editor carries one sentence about
+     * the migration and has nowhere to put the rules that took, which is the
+     * half of the answer worth having.
+     */
+    private final Label lblHiddenCount;
 
     private final CheckboxTreeViewer viewer;
     private final TableViewerFilter viewerFilter = new TableViewerFilter();
@@ -192,10 +211,26 @@ public class DiffTableViewer extends Composite {
     private TreeViewerColumn columnLocation;
     private TreeViewerColumn columnLibrary;
 
+    /**
+     * Whether the name column currently holds the highlighting provider. Starts
+     * false to match the provider {@link #initColumns()} installs, since a
+     * viewer opens with an empty filter.
+     */
+    private boolean nameHighlightEnabled;
+
     private ILoader dbProject;
     private ILoader dbRemote;
     private DatabaseType dbType;
-    private final ISettings settings;
+    private ISettings settings;
+    /**
+     * How deeply the comparison behind {@link #dbProject}/{@link #dbRemote} was
+     * loaded. Defaults to {@link ComparisonDepth#FULL} so a caller that never
+     * learned about receive-only projects - the diff wizard's plain two-database
+     * comparison, for one - keeps building a dependency graph exactly as it
+     * always has; see {@link #writeDeps(TreeElement)}.
+     */
+    private ComparisonDepth comparisonDepth = ComparisonDepth.FULL;
+    private int retiredColumnRules;
 
     private boolean isApplyToProj = true;
 
@@ -213,6 +248,34 @@ public class DiffTableViewer extends Composite {
 
     public Collection<TreeElement> getElements() {
         return Collections.unmodifiableCollection(elements);
+    }
+
+    @Override
+    public void dispose() {
+        clearComparisonReferences();
+        super.dispose();
+    }
+
+    /**
+     * Releases the comparison graph without touching SWT widgets. This is safe
+     * both before and after the control hierarchy has been disposed.
+     */
+    public void clearComparisonReferences() {
+        gitUserLoads.cancel();
+        oldSelection = null;
+        newSelection = null;
+        dbProject = null;
+        dbRemote = null;
+        settings = null;
+        tables = null;
+        elementInfoMap.clear();
+        // dbProject/dbRemote above are cleared so a stale interaction cannot
+        // reach them; STRUCTURAL_ONLY is the depth that keeps writeDeps() from
+        // ever trying to, since it returns before touching either one.
+        comparisonDepth = ComparisonDepth.STRUCTURAL_ONLY;
+        // the rules of a comparison nobody is looking at any more say nothing
+        // about the next one
+        retiredColumnRules = 0;
     }
 
     public DiffTableViewer(Composite parent, boolean viewOnly, DatabaseType databaseType, ISettings settings) {
@@ -245,7 +308,7 @@ public class DiffTableViewer extends Composite {
         Composite upperComp = new Composite(this, SWT.NONE);
         upperComp.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
 
-        gl = new GridLayout(viewOnly ? 3 : 4, false);
+        gl = new GridLayout(viewOnly ? 4 : 5, false);
         gl.marginWidth = gl.marginHeight = 0;
         upperComp.setLayout(gl);
 
@@ -341,6 +404,14 @@ public class DiffTableViewer extends Composite {
             }
         });
 
+        lblHiddenCount = new Label(upperComp, SWT.NONE);
+        GridData hiddenLayout = new GridData(SWT.LEFT, SWT.CENTER, false, false);
+        // starts excluded, so a viewer that never receives a comparison with
+        // rules never grows a cell for one
+        hiddenLayout.exclude = true;
+        lblHiddenCount.setLayoutData(hiddenLayout);
+        lblHiddenCount.setVisible(false);
+
         Composite container = new Composite(upperComp, SWT.NONE);
         container.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
         if (lineManager != null) {
@@ -372,8 +443,7 @@ public class DiffTableViewer extends Composite {
             public void modifyText(ModifyEvent e) {
                 String text = ((Text) e.getSource()).getText().strip();
                 filterHistory(text);
-                viewerFilter.setFilter(text);
-                viewer.refresh();
+                applyNameFilter(text);
             }
 
             private void filterHistory(String text) {
@@ -428,6 +498,95 @@ public class DiffTableViewer extends Composite {
         viewer.setFilters(viewerFilter);
         initColumns();
         viewer.setContentProvider(contentProvider);
+    }
+
+    /**
+     * Applies the object name filter and rebuilds the tree.
+     * <p>
+     * Package-visible so a test can drive the very path the filter field drives
+     * without waiting out its half-second aggregation.
+     *
+     * @param text the filter as typed, empty for no filter
+     */
+    void applyNameFilter(String text) {
+        viewerFilter.setFilter(text);
+        setNameHighlightEnabled(viewerFilter.hasNameFilter());
+
+        Tree tree = viewer.getTree();
+        int rowsBefore = tree.getItemCount();
+        long started = System.nanoTime();
+        viewer.refresh();
+        long elapsed = System.nanoTime() - started;
+        // rows_before and rows_after are both read off the widget rather than
+        // off the filter, which would only restate the filter back. The cost is
+        // in the rows this refresh has to create, so it is the two counts
+        // together - not either one - that explains the milliseconds: clearing a
+        // filter that matched almost everything reuses nearly every row and is
+        // quick, clearing one that matched a handful builds the whole tree again.
+        PerformanceTelemetry.publish(new StringBuilder(160)
+                .append("pgCodeKeeper diff filter: filter_len=") //$NON-NLS-1$
+                .append(text == null ? 0 : text.length())
+                .append(" highlight=") //$NON-NLS-1$
+                .append(nameHighlightEnabled)
+                .append(" rows_before=") //$NON-NLS-1$
+                .append(rowsBefore)
+                .append(" rows_after=") //$NON-NLS-1$
+                .append(tree.getItemCount())
+                .append(" total=") //$NON-NLS-1$
+                .append(elementInfoMap.size())
+                .append(" ms=") //$NON-NLS-1$
+                .append(TimeUnit.NANOSECONDS.toMillis(elapsed))
+                .toString());
+    }
+
+    /**
+     * Puts the match highlighting label provider on the object name column only
+     * while there is a filter to highlight.
+     * <p>
+     * Highlighting needs a {@link StyledCellLabelProvider}, an owner-draw
+     * provider whose {@code update} forces a per-cell redraw through
+     * {@link ViewerCell#getBounds()}. On Cocoa that call locates the row by
+     * walking the outline view, so every row the viewer builds costs O(rows) and
+     * building a tree costs O(rows^2). What is paid for is the rows a refresh
+     * has to create, not the rows it ends up showing: over 11 000 objects,
+     * clearing a filter that had matched one of them rebuilt every row and took
+     * 51 s, while clearing one that had matched them all reused the rows and
+     * took 0.08 s. Without the provider both take under 40 ms and the initial
+     * fill drops from 2.7 s to 0.13 s. An empty filter has nothing to highlight
+     * anyway - the match location the style range is built from is null without
+     * a filter - so the plain provider gives up nothing.
+     *
+     * @param enabled whether a filter is set and its match is to be highlighted
+     */
+    private void setNameHighlightEnabled(boolean enabled) {
+        if (enabled == nameHighlightEnabled) {
+            return;
+        }
+        nameHighlightEnabled = enabled;
+        // installing a provider disposes the previous one, and it is that
+        // disposal which takes the owner-draw listeners off the tree again
+        columnName.setLabelProvider(enabled ? new NameHighlightLabelProvider() : new NameLabelProvider());
+    }
+
+    /**
+     * Uses the final settings that produced the models currently displayed by
+     * this viewer for compare editors and post-load filters.
+     */
+    public void setComparisonSettings(ISettings settings) {
+        this.settings = settings;
+    }
+
+    /**
+     * Records how deeply the comparison currently behind this viewer was
+     * loaded, so {@link #writeDeps(TreeElement)} can tell a receive-only
+     * comparison's empty dependency graph from an ordinary one that is simply
+     * empty. A caller that never calls this keeps the {@link ComparisonDepth#FULL}
+     * default, so it sees no change in behavior.
+     *
+     * @param comparisonDepth the depth the currently displayed comparison was loaded at
+     */
+    public void setComparisonDepth(ComparisonDepth comparisonDepth) {
+        this.comparisonDepth = comparisonDepth;
     }
 
     public void createRightSide(Composite parent) {
@@ -535,6 +694,25 @@ public class DiffTableViewer extends Composite {
     }
 
     protected void writeDeps(TreeElement el) {
+        if (comparisonDepth == ComparisonDepth.STRUCTURAL_ONLY) {
+            // A structurally loaded comparison resolves the edges that are
+            // readable off the model - a child to its parent, a foreign key to
+            // the unique it points at - and none of the edges that only the
+            // analysis phase writes into getDependencies(). So the graph
+            // DepcyFinder.byStatement below would return is not empty, it is
+            // structural and short, and the direction this dialog is mostly
+            // opened for is the one that suffers worst: walked in reverse, "who
+            // depends on this column" answers with the schema and the object's
+            // own children while the several hundred views that read it are
+            // simply not there. A graph that looks complete and is not is a
+            // worse answer than a refusal, so this refuses - before the graph
+            // dialog even opens, so no one configures a graph that cannot be
+            // built honestly.
+            MessageDialog.openInformation(getShell(), Messages.DiffTableViewer_menu_build_graph,
+                    Messages.DiffTableViewer_depcy_unavailable_in_receive_only);
+            return;
+        }
+
         String objName = el.getQualifiedName();
         boolean isBothEnabled = el.getSide() == DiffSide.BOTH;
         boolean isProject = el.getSide() == DiffSide.LEFT;
@@ -614,25 +792,9 @@ public class DiffTableViewer extends Composite {
         });
 
         columnName = createColumn(Columns.NAME);
-        columnName.setLabelProvider(new StyledCellLabelProvider() {
-
-            @Override
-            public void update(ViewerCell cell) {
-                String name = ((TreeElement) cell.getElement()).getName();
-                cell.setText(name);
-
-                Region loc = viewerFilter.getMatchingLocation(name, viewerFilter.filterName,
-                        viewerFilter.useRegEx ? viewerFilter.regExPattern : null);
-                if (loc != null) {
-                    StyleRange highlightMatch = new StyleRange(loc.getOffset(), loc.getLength(), null,
-                            getDisplay().getSystemColor(SWT.COLOR_YELLOW));
-                    cell.setStyleRanges(new StyleRange[] { highlightMatch });
-                } else {
-                    cell.setStyleRanges(null);
-                }
-                super.update(cell);
-            }
-        });
+        // no filter yet, so nothing to highlight and no reason to pay for the
+        // owner-draw provider that highlights, see setNameHighlightEnabled
+        columnName.setLabelProvider(new NameLabelProvider());
 
         columnType = createColumn(Columns.TYPE);
         columnType.setLabelProvider(new ColumnLabelProvider() {
@@ -712,6 +874,52 @@ public class DiffTableViewer extends Composite {
 
         setColumnHeaders();
         updateColumnsWidth();
+    }
+
+    /**
+     * Renders the object name and nothing else. Held by the name column
+     * whenever no filter is set, see {@link #setNameHighlightEnabled(boolean)}.
+     */
+    private final class NameLabelProvider extends ColumnLabelProvider {
+
+        @Override
+        public String getText(Object element) {
+            return ((TreeElement) element).getName();
+        }
+
+        @Override
+        public void update(ViewerCell cell) {
+            super.update(cell);
+            // rows outlive a change of filter, and so would the ranges the
+            // highlighting provider left on them: inert once owner draw is off,
+            // but a row that is not highlighted must not be carrying a highlight
+            cell.setStyleRanges(null);
+        }
+    }
+
+    /**
+     * Renders the object name with the part the filter matched picked out in
+     * yellow. Held by the name column only while a filter is set, see
+     * {@link #setNameHighlightEnabled(boolean)}.
+     */
+    private final class NameHighlightLabelProvider extends StyledCellLabelProvider {
+
+        @Override
+        public void update(ViewerCell cell) {
+            String name = ((TreeElement) cell.getElement()).getName();
+            cell.setText(name);
+
+            Region loc = viewerFilter.getMatchingLocation(name, viewerFilter.filterName,
+                    viewerFilter.useRegEx ? viewerFilter.regExPattern : null);
+            if (loc != null) {
+                StyleRange highlightMatch = new StyleRange(loc.getOffset(), loc.getLength(), null,
+                        getDisplay().getSystemColor(SWT.COLOR_YELLOW));
+                cell.setStyleRanges(new StyleRange[] { highlightMatch });
+            } else {
+                cell.setStyleRanges(null);
+            }
+            super.update(cell);
+        }
     }
 
     private TreeViewerColumn createColumn(Columns columnType) {
@@ -867,11 +1075,50 @@ public class DiffTableViewer extends Composite {
             IDatabase source = dbProject.getDatabase();
             IDatabase target = dbRemote.getDatabase();
             selected = new TreeFlattener().onlyEdits(source, target)
-                    .useIgnoreList(ignoreList, dbRemote.getDatabaseName()).flatten(diffTree);
-            tabs = DiffTree.getTablesWithChangedColumns(source, target, selected);
+                    .useIgnoreList(ignoreList, dbRemote.getDatabaseName())
+                    // this flattening is the one a reader is about to look at,
+                    // so it is the one that says what the rules took; the tree
+                    // pass said its own half while the tree was built
+                    .countHiddenInto(hiddenObjects()).flatten(diffTree);
+            // a table whose only changed column is hidden has no changed column:
+            // the decision is made by name and type, so it does not care that the
+            // two sides are handed over here in the opposite order
+            tabs = DiffTree.getTablesWithChangedColumns(source, target, selected,
+                    ColumnVisibility.of(ignoreList, dbRemote.getDatabaseName()));
         }
 
         setInputCollection(selected, dbProject, dbRemote, tabs);
+        // after setInputCollection, which resets the note for a caller that
+        // brings a collection of its own and has no comparison behind it
+        showHiddenCount(hiddenObjects().report(), ignoreList, retiredColumnRules);
+    }
+
+    /**
+     * How many {@code type=COLUMN} rules the comparison about to be shown
+     * turned off, see {@code ProjectIgnoreLists#dropColumnRulesIfStructural}.
+     * <p>
+     * Comes from the caller and not from the ignore list because by the time
+     * this viewer reads that list those rules are gone from it: what is being
+     * reported is precisely their absence, and an absence cannot be counted
+     * from what is left. Set before {@link #setInput}, which is the only place
+     * that reads it.
+     *
+     * @param retiredColumnRules the number of rules turned off, zero for every
+     *                           ordinary comparison
+     */
+    public void setRetiredColumnRules(int retiredColumnRules) {
+        this.retiredColumnRules = retiredColumnRules;
+    }
+
+    /**
+     * The holder of the comparison on display, which is where both passes of the
+     * rules put what they took, see
+     * {@code ISettings#getHiddenObjects()}. Never {@code null}: a viewer without
+     * settings - the commit dialog builds one - has no comparison of its own and
+     * so has nothing to report.
+     */
+    private HiddenObjects hiddenObjects() {
+        return settings == null ? HiddenObjects.NONE : settings.getHiddenObjects();
     }
 
     /**
@@ -881,6 +1128,14 @@ public class DiffTableViewer extends Composite {
      */
     public void setInputCollection(Collection<TreeElement> collection, ILoader dbProject, ILoader dbRemote,
             Set<TreeElement> tables) {
+        // a caller handing over a collection of its own - the commit dialog -
+        // applied no rules to build it, so whatever the last comparison hid is
+        // not what this one hides
+        showHiddenCount();
+        gitUserLoads.cancel();
+        // Structured selections retain TreeElement parents and the whole previous diff tree.
+        oldSelection = null;
+        newSelection = null;
         this.dbProject = dbProject;
         this.dbRemote = dbRemote;
 
@@ -899,12 +1154,12 @@ public class DiffTableViewer extends Composite {
 
         this.tables = tables;
 
-        if (showGitUser && !elementInfoMap.isEmpty()) {
-            readGitUsers();
-        }
-
         if (!elementInfoMap.isEmpty() && (location != null)) {
             setLibLocations();
+        }
+
+        if (showGitUser && !elementInfoMap.isEmpty()) {
+            readGitUsers(createGitUserSnapshot());
         }
 
         if (dbRemote != null) {
@@ -972,34 +1227,58 @@ public class DiffTableViewer extends Composite {
         });
     }
 
-    private void readGitUsers() {
+    private Map<Path, List<ElementMetaInfo>> createGitUserSnapshot() {
+        Map<Path, List<ElementMetaInfo>> snapshot = new HashMap<>();
+        IDatabase projectDatabase = dbProject.getDatabase();
+        elementInfoMap.forEach((element, meta) -> {
+            if (element.getSide() != DiffSide.RIGHT && meta.getLibLocation() == null) {
+                Path fullPath = location.resolve(dbType.getDatabaseProvider()
+                        .getRelativeFilePath(element.getStatement(projectDatabase)));
+                snapshot.computeIfAbsent(fullPath, key -> new ArrayList<>()).add(meta);
+            }
+        });
+        return snapshot.entrySet().stream().collect(Collectors.toUnmodifiableMap(
+                Entry::getKey, entry -> List.copyOf(entry.getValue())));
+    }
+
+    private void readGitUsers(Map<Path, List<ElementMetaInfo>> snapshot) {
+        Path projectLocation = location;
+        AtomicReference<GitUserLoadCoordinator.Request> requestRef = new AtomicReference<>();
+        AtomicReference<Map<Path, List<ElementMetaInfo>>> snapshotRef = new AtomicReference<>(snapshot);
         Job job = new Job(Messages.DiffTableViewer_reading_git_history) {
 
             @Override
             protected IStatus run(IProgressMonitor monitor) {
-                try (GitUserReader reader = new GitUserReader(location)) {
+                GitUserLoadCoordinator.Request request = requestRef.get();
+                if (monitor.isCanceled() || !request.isCurrent()) {
+                    return Status.CANCEL_STATUS;
+                }
+                try (GitUserReader reader = new GitUserReader(projectLocation)) {
                     Path root = reader.getLocation();
                     Map<String, List<ElementMetaInfo>> metas = new HashMap<>();
-                    elementInfoMap.forEach((k, v) -> {
-                        if ((k.getSide() != DiffSide.RIGHT) && (v.getLibLocation() == null)) {
-                            Path fullPath = location.resolve(dbType.getDatabaseProvider()
-                                    .getRelativeFilePath(k.getStatement(dbProject.getDatabase())));
-                            // git always uses linux paths
-                            // since all paths here are relative it's ok to simply
-                            // join their elements with forward slashes
-                            String path = StreamSupport.stream(root.relativize(fullPath).spliterator(), false)
-                                    .map(Path::toString).collect(Collectors.joining("/")); //$NON-NLS-1$
-                            List<ElementMetaInfo> meta = metas.get(path);
-                            if (meta == null) {
-                                meta = new ArrayList<>();
-                                metas.put(path, meta);
-                            }
-                            meta.add(v);
+                    Map<Path, List<ElementMetaInfo>> currentSnapshot = snapshotRef.getAndSet(Map.of());
+                    for (Entry<Path, List<ElementMetaInfo>> entry : currentSnapshot.entrySet()) {
+                        if (monitor.isCanceled() || !request.isCurrent()) {
+                            return Status.CANCEL_STATUS;
                         }
-                    });
-                    reader.parseLocalChanges(metas);
-                    reader.parseLastChange(metas);
-                    return Status.OK_STATUS;
+                        // git always uses linux paths; all paths here are relative
+                        String path = StreamSupport.stream(root.relativize(entry.getKey()).spliterator(), false)
+                                .map(Path::toString).collect(Collectors.joining("/")); //$NON-NLS-1$
+                        metas.put(path, entry.getValue());
+                    }
+                    BooleanSupplier isCancelled = () -> monitor.isCanceled() || !request.isCurrent();
+                    int requested = metas.size();
+                    long started = System.nanoTime();
+                    reader.parseLocalChanges(metas, isCancelled);
+                    long localNanos = System.nanoTime() - started;
+                    int afterLocal = metas.size();
+                    GitAuthorCache cache = GitAuthorCache.workspaceCache();
+                    GitUserReader.HistoryStats stats =
+                            reader.parseLastChange(metas, cache, isCancelled);
+                    publishGitAuthorTelemetry(requested, afterLocal,
+                            localNanos, System.nanoTime() - started,
+                            cache != null, stats);
+                    return isCancelled.getAsBoolean() ? Status.CANCEL_STATUS : Status.OK_STATUS;
                 } catch (IOException e) {
                     return new Status(IStatus.ERROR, PLUGIN_ID.THIS, Messages.DiffTableViewer_error_reading_git_history,
                             e);
@@ -1011,21 +1290,76 @@ public class DiffTableViewer extends Composite {
 
             @Override
             public void done(IJobChangeEvent event) {
-                if (event.getResult().isOK()) {
+                event.getJob().removeJobChangeListener(this);
+                snapshotRef.set(Map.of());
+                GitUserLoadCoordinator.Request request = requestRef.get();
+                request.complete();
+                if (event.getResult().isOK() && request.isCurrent()) {
                     UiSync.exec(DiffTableViewer.this, () -> {
-                        if (viewerFilter.isLocalChange.get() || !viewerFilter.gitUserFilter.isEmpty()
-                                || comparator.sortOrder.stream().anyMatch(c -> c.col == Columns.GIT_USER)) {
-                            viewer.refresh();
-                        } else {
-                            viewer.update(elements.toArray(new TreeElement[0]), new String[] { GITLABEL_PROP });
-                        }
+                        request.publish(DiffTableViewer.this::publishGitUsers);
                     });
                 }
             }
         });
 
+        requestRef.set(gitUserLoads.start(job::cancel));
         job.setUser(true);
         job.schedule();
+    }
+
+    private static void publishGitAuthorTelemetry(int requested,
+            int afterLocal, long localNanos, long totalNanos,
+            boolean cacheEnabled, GitUserReader.HistoryStats stats) {
+        String cacheSource;
+        if (!cacheEnabled) {
+            cacheSource = "disabled"; //$NON-NLS-1$
+        } else if (!stats.snapshotMatched()) {
+            cacheSource = "miss"; //$NON-NLS-1$
+        } else if (stats.memoryHit()) {
+            cacheSource = "memory"; //$NON-NLS-1$
+        } else if (stats.diskHit()) {
+            cacheSource = "disk"; //$NON-NLS-1$
+        } else {
+            cacheSource = "unknown"; //$NON-NLS-1$
+        }
+        PerformanceTelemetry.publish(new StringBuilder(320)
+                .append("pgCodeKeeper Git authors: requested=") //$NON-NLS-1$
+                .append(requested)
+                .append(" after_local=") //$NON-NLS-1$
+                .append(afterLocal)
+                .append(" cache_source=") //$NON-NLS-1$
+                .append(cacheSource)
+                .append(" cache_hits=") //$NON-NLS-1$
+                .append(stats.cacheHits())
+                .append(" history_resolved=") //$NON-NLS-1$
+                .append(stats.historyResolved())
+                .append(" local_ms=") //$NON-NLS-1$
+                .append(TimeUnit.NANOSECONDS.toMillis(localNanos))
+                .append(" cache_read_ms=") //$NON-NLS-1$
+                .append(TimeUnit.NANOSECONDS.toMillis(
+                        stats.cacheReadNanos()))
+                .append(" history_ms=") //$NON-NLS-1$
+                .append(TimeUnit.NANOSECONDS.toMillis(
+                        stats.historyNanos()))
+                .append(" cache_write_ms=") //$NON-NLS-1$
+                .append(TimeUnit.NANOSECONDS.toMillis(
+                        stats.cacheWriteNanos()))
+                .append(" total_ms=") //$NON-NLS-1$
+                .append(TimeUnit.NANOSECONDS.toMillis(totalNanos))
+                .append(" cache_stored=") //$NON-NLS-1$
+                .append(stats.cacheStored())
+                .append(" cancelled=") //$NON-NLS-1$
+                .append(stats.cancelled())
+                .toString());
+    }
+
+    private void publishGitUsers() {
+        if (viewerFilter.isLocalChange.get() || !viewerFilter.gitUserFilter.isEmpty()
+                || comparator.sortOrder.stream().anyMatch(c -> c.col == Columns.GIT_USER)) {
+            viewer.refresh();
+        } else {
+            viewer.update(elements.toArray(new TreeElement[0]), new String[] { GITLABEL_PROP });
+        }
     }
 
     private void setChecked(TreeElement el, boolean checked) {
@@ -1085,6 +1419,46 @@ public class DiffTableViewer extends Composite {
             }
         }
         return count;
+    }
+
+    /** Takes the note away: this viewer holds no comparison with rules. */
+    private void showHiddenCount() {
+        showHiddenCount(Report.EMPTY, null, 0);
+    }
+
+    /**
+     * Writes what the rules of the comparison took, or takes the note off the
+     * screen where they could take nothing.
+     * <p>
+     * Called when a comparison arrives and at no other time. The number does not
+     * change with a checkbox, a filter or a repaint - it is a property of the
+     * comparison, not of what is selected in it - so it is written once and read
+     * from the widget afterwards. That is the whole of the cost of the feature
+     * on the drawing side, and it is the reason the count is taken while the
+     * rules are applied rather than asked for here.
+     *
+     * @param report     what the rules took
+     * @param ignoreList the rules themselves, for the part of the hint that is
+     *                   about the rules rather than about what they took
+     * @param retiredColumnRules how many rules this comparison turned off, which
+     *                   is the one thing about them that cannot be read back off
+     *                   {@code ignoreList}, see {@link #setRetiredColumnRules}
+     */
+    private void showHiddenCount(Report report, IgnoreList ignoreList, int retiredColumnRules) {
+        boolean speaks = HiddenObjectsNote.speaks(report, retiredColumnRules);
+        GridData data = (GridData) lblHiddenCount.getLayoutData();
+        if (!speaks && data.exclude) {
+            // silent and already absent: a comparison without rules - which is
+            // most of them - must not pay so much as a layout for this
+            return;
+        }
+
+        data.exclude = !speaks;
+        lblHiddenCount.setVisible(speaks);
+        lblHiddenCount.setText(speaks ? HiddenObjectsNote.text(report, retiredColumnRules) : EMPTY_STRING);
+        lblHiddenCount.setToolTipText(
+                speaks ? HiddenObjectsNote.hint(report, ignoreList, retiredColumnRules) : null);
+        lblHiddenCount.getParent().layout();
     }
 
     public boolean checkLibChange() {
@@ -1447,6 +1821,17 @@ public class DiffTableViewer extends Composite {
                     regExPattern = null;
                 }
             }
+        }
+
+        /**
+         * Whether a name to match on is set. The highlight in the name column
+         * is built from {@link #getMatchingLocation}, which has nothing to
+         * return without one.
+         *
+         * @return true if a non-empty name filter is set
+         */
+        boolean hasNameFilter() {
+            return filterName != null;
         }
 
         public boolean isAdvancedEmpty() {

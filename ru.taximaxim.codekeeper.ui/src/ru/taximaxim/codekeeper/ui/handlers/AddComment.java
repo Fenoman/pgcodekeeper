@@ -122,7 +122,10 @@ public final class AddComment extends AbstractHandler {
         TreeElement el = PgCodeKeeperApi.createTree(newDbSource, oldDbSource, settings).findElement(statement);
 
         PgDbProject proj = new PgDbProject(project);
-        var updaterSettings = new UISettings(project);
+        // Both sides of this export are the project itself, so the rules can
+        // take nothing away here; they are handed over all the same, because
+        // every writer of project files is told them or none is.
+        var updaterSettings = UISettings.forExport(project);
         provider.getProjectUpdater(newDb, oldDb, List.of(el), proj.getPathToProject(), false, updaterSettings)
                 .updatePartial();
         file.refreshLocal(IResource.DEPTH_INFINITE, null);

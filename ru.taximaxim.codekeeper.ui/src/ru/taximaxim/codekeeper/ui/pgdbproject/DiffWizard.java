@@ -401,6 +401,9 @@ final class PagePartial extends WizardPage {
         lblNewDb.setText(newDb.getDatabaseName());
         lblOldDb.setText(oldDb.getDatabaseName());
         lblNewDb.getParent().layout();
+        // the settings this tree was built under, so that the table reports what
+        // the rules took while it was built and not only what they take now
+        diffTable.setComparisonSettings(settings);
         diffTable.setInput(oldDb, newDb, diffTree, ignoreList);
         diffTable.setDbType(dbType);
     }
