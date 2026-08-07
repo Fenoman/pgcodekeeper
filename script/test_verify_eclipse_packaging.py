@@ -170,7 +170,7 @@ class ExactLineTest(unittest.TestCase):
         self.assertEqual([], VERIFY.errors)
 
     def test_core_pin_has_a_single_source_of_truth(self):
-        expected_commit = "c106361b9223cac67f66785f0c3ff6cd9fe21c2a"
+        expected_commit = "8f3982c126678877d2c746b2612a9f70b02b9db4"
 
         self.assertEqual(expected_commit, VERIFY.CORE_COMMIT)
         self.assertEqual(
@@ -329,11 +329,11 @@ class ExactLineTest(unittest.TestCase):
             content.find(source_gate), content.find(unit_tests))
 
     @staticmethod
-    def _core_manifest(version="15.2.0-neo1", commit=None, separator="\n"):
+    def _core_manifest(version="15.3.0-neo1", commit=None, separator="\n"):
         commit = VERIFY.CORE_COMMIT if commit is None else commit
         return separator.join((
             "Manifest-Version: 1.0",
-            "Bundle-Version: 15.2.0.neo1",
+            "Bundle-Version: 15.3.0.neo1",
             f"Implementation-Version: {version}",
             f"Implementation-Build: {commit}",
             ""))
@@ -341,7 +341,7 @@ class ExactLineTest(unittest.TestCase):
     def test_core_manifest_verification_requires_exact_versions(self):
         VERIFY.verify_core_manifest(
             "Manifest-Version: 1.0\n"
-            "Bundle-Version: 15.2.0.neo1\n",
+            "Bundle-Version: 15.3.0.neo1\n",
             "Core manifest")
 
         self.assertEqual(
@@ -369,8 +369,8 @@ class ExactLineTest(unittest.TestCase):
     def test_core_manifest_verification_rejects_a_build_without_git_metadata(self):
         VERIFY.verify_core_manifest(
             "Manifest-Version: 1.0\n"
-            "Bundle-Version: 15.2.0.neo1\n"
-            "Implementation-Version: 15.2.0-neo1\n",
+            "Bundle-Version: 15.3.0.neo1\n"
+            "Implementation-Version: 15.3.0-neo1\n",
             "Core manifest")
 
         self.assertEqual(
@@ -380,9 +380,9 @@ class ExactLineTest(unittest.TestCase):
 
     def test_core_manifest_verification_rejects_orphan_continuation(self):
         VERIFY.verify_core_manifest(
-            " Implementation-Version: 15.2.0-neo1\r\n"
+            " Implementation-Version: 15.3.0-neo1\r\n"
             "Manifest-Version: 1.0\r\n"
-            "Bundle-Version: 15.2.0.neo1\r\n"
+            "Bundle-Version: 15.3.0.neo1\r\n"
             f"Implementation-Build: {VERIFY.CORE_COMMIT}\r\n",
             "Core manifest")
 
@@ -392,21 +392,21 @@ class ExactLineTest(unittest.TestCase):
             VERIFY.errors)
 
     def test_core_manifest_verification_rejects_value_whitespace(self):
-        for value in (" 15.2.0-neo1", "15.2.0-neo1 "):
+        for value in (" 15.3.0-neo1", "15.3.0-neo1 "):
             with self.subTest(value=value):
                 VERIFY.verify_core_manifest(
                     self._core_manifest(version=value), "Core manifest")
 
                 self.assertEqual(
                     ["Core manifest 'Implementation-Version' must be exactly "
-                     f"'15.2.0-neo1', found {value!r}"],
+                     f"'15.3.0-neo1', found {value!r}"],
                     VERIFY.errors)
                 VERIFY.errors.clear()
 
     def test_core_manifest_verification_rejects_case_insensitive_duplicates(self):
         VERIFY.verify_core_manifest(
             self._core_manifest()
-            + "implementation-version: 15.2.0-neo1\n",
+            + "implementation-version: 15.3.0-neo1\n",
             "Core manifest")
 
         self.assertEqual(
@@ -417,8 +417,8 @@ class ExactLineTest(unittest.TestCase):
     def test_core_manifest_verification_accepts_crlf_and_continuations(self):
         VERIFY.verify_core_manifest(
             "Manifest-Version: 1.0\r\n"
-            "Bundle-Version: 15.2.0.neo1\r\n"
-            "Implementation-Version: 15.2.0-\r\n"
+            "Bundle-Version: 15.3.0.neo1\r\n"
+            "Implementation-Version: 15.3.0-\r\n"
             " neo1\r\n"
             f"Implementation-Build: {VERIFY.CORE_COMMIT[:20]}\r\n"
             f" {VERIFY.CORE_COMMIT[20:]}\r\n",
@@ -429,10 +429,10 @@ class ExactLineTest(unittest.TestCase):
     def test_core_manifest_verification_ignores_per_entry_sections(self):
         VERIFY.verify_core_manifest(
             "Manifest-Version: 1.0\r\n"
-            "Bundle-Version: 15.2.0.neo1\r\n"
+            "Bundle-Version: 15.3.0.neo1\r\n"
             "\r\n"
             "Name: org/pgcodekeeper/core/utils/Utils.class\r\n"
-            "Implementation-Version: 15.2.0-neo1\r\n"
+            "Implementation-Version: 15.3.0-neo1\r\n"
             f"Implementation-Build: {VERIFY.CORE_COMMIT}\r\n",
             "Core manifest")
 

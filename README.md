@@ -108,14 +108,14 @@ index: a partially published generation can never be opened.
 ## Build
 
 Build requires Java (JDK) 21+ and Apache Maven 3.9+. The optimized Eclipse
-bundle uses Core `15.2.0-neo1`, so install that artifact first.
+bundle uses Core `15.3.0-neo1`, so install that artifact first.
 
 ```sh
 MAVEN_REPO="$(mktemp -d)"
 
 git clone --branch neo https://github.com/Fenoman/pgcodekeeper-core.git
 cd pgcodekeeper-core
-git checkout c106361b9223cac67f66785f0c3ff6cd9fe21c2a
+git checkout 8f3982c126678877d2c746b2612a9f70b02b9db4
 mvn -B -ntp clean install -DskipTests -Dmaven.repo.local="$MAVEN_REPO"
 cd ..
 
@@ -125,7 +125,7 @@ mvn -B -ntp clean verify -DskipTests -Dmaven.repo.local="$MAVEN_REPO"
 ```
 
 CI pins Core to immutable commit
-`c106361b9223cac67f66785f0c3ff6cd9fe21c2a`; changing the `neo` branch does
+`8f3982c126678877d2c746b2612a9f70b02b9db4`; changing the `neo` branch does
 not silently change a plugin build. Standalone archives for Linux, Windows,
 macOS x86_64, and macOS aarch64 are created in
 `ru.taximaxim.codekeeper.mainapp/product/rcp/target/products`.
