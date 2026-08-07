@@ -5,6 +5,12 @@ on:
     tags:
       - 'v*.*.*'
 
+permissions:
+  contents: write
+
+env:
+  PGCK_MAVEN_REPO: ${{ github.workspace }}/.pgck-m2-${{ github.run_id }}-${{ github.run_attempt }}
+
 jobs:
   build:
     runs-on: macos-latest
@@ -13,18 +19,28 @@ jobs:
       - name: checkout
         uses: actions/checkout@v6
 
-      - name: checkout pgcodekeeper.github.io
-        uses: actions/checkout@v6
-        with:
-          repository: pgcodekeeper/pgcodekeeper.github.io
-          token: ${{ secrets.API_TOKEN_GITHUB }}
-          path: pgcodekeeper.github.io
+      - name: verify release identity
+        run: python3 script/verify-eclipse-packaging.py --release-tag "${GITHUB_REF_NAME}"
 
       - name: set up JDK 21
         uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '21'
+
+      - name: resolve optimized Core pin
+        run: grep -E '^[A-Z][A-Z0-9_]*=' .github/core-ref.env >> "$GITHUB_ENV"
+
+      - name: checkout optimized Core
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.PGCK_CORE_REPOSITORY }}
+          ref: ${{ env.PGCK_CORE_REF }}
+          path: pgcodekeeper-core
+          persist-credentials: false
+
+      - name: install optimized Core
+        run: mvn -B -ntp -f pgcodekeeper-core/pom.xml clean install -DskipTests -Dmaven.repo.local="${PGCK_MAVEN_REPO}"
 
       - name: get jarsigner key
         uses: 1arp/create-a-file-action@1cdd9b67e2fa15cff7431f5ba6863466a76a9a9e #v0.4.6
@@ -53,21 +69,46 @@ jobs:
           security create-keychain -p "" build.keychain
           security default-keychain -s build.keychain
           security unlock-keychain -p "" build.keychain
-          security import certificate.p12 -k build.keychain -P $MAC_PASS -T /usr/bin/codesign
+          security import certificate.p12 -k build.keychain -P "$MAC_PASS" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" build.keychain
           security find-identity build.keychain
 
       - name: build
-        run: mvn clean -ntp deploy -DskipTests -P code-sign -Dkeystore=${{ github.workspace }}/tmp/keystore/key.jks
+        run: |
+          set -o pipefail
+          run_build() {
+            mvn clean -ntp deploy -DskipTests -P code-sign -Dkeystore=${{ github.workspace }}/tmp/keystore/key.jks -Dmaven.repo.local="${PGCK_MAVEN_REPO}" 2>&1 \
+              | tee "${RUNNER_TEMP}/build.log"
+          }
+          if run_build; then
+            exit 0
+          fi
+          # A first clean isolated-repo reactor can lose a freshly built mainapp artifact
+          # before assemble-repository reads it. Retry that one failure exactly once.
+          if grep -q 'points to a non existing file' "${RUNNER_TEMP}/build.log"; then
+            echo '::warning::retrying the known transient Tycho reactor failure once'
+            run_build
+          else
+            exit 1
+          fi
+
+      - name: verify release artifacts
+        run: >-
+          python3 script/verify-eclipse-packaging.py
+          --artifacts ru.taximaxim.codekeeper.mainapp/product/rcp/target/products
+          --updatesite-dir ru.taximaxim.codekeeper.mainapp/updatesite/target
 
       - name: set version
-        run: echo "RELEASE_VERSION=$(echo ${GITHUB_REF#refs/*/} | cut -c 2-)" >> $GITHUB_ENV
+        run: echo "RELEASE_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
 
       - name: set prefix
-        run: echo "PREFIX=$(echo $"pgCodeKeeper-")" >> $GITHUB_ENV
+        run: echo "PREFIX=pgCodeKeeper-" >> "$GITHUB_ENV"
 
       - name: set linux build name
         run: echo "LINUX_BUILD=${{ env.PREFIX}}${{ env.RELEASE_VERSION }}-linux.gtk.x86_64.tar.gz" >> $GITHUB_ENV
+
+      - name: set linux aarch64 build name
+        run: echo "LINUX_AARCH_BUILD=${{ env.PREFIX }}${{ env.RELEASE_VERSION }}-linux.gtk.aarch64.tar.gz" >> $GITHUB_ENV
 
       - name: set windows build name
         run: echo "WINDOWS_BUILD=${{ env.PREFIX }}${{ env.RELEASE_VERSION }}-win32.win32.x86_64.zip" >> $GITHUB_ENV
@@ -88,24 +129,11 @@ jobs:
           name: pgCodeKeeper ${{ env.RELEASE_VERSION }}
           draft: false
           prerelease: false
+          fail_on_unmatched_files: true
           files: |
             ${{ github.workspace }}/ru.taximaxim.codekeeper.mainapp/product/rcp/target/products/${{ env.LINUX_BUILD }}
+            ${{ github.workspace }}/ru.taximaxim.codekeeper.mainapp/product/rcp/target/products/${{ env.LINUX_AARCH_BUILD }}
             ${{ github.workspace }}/ru.taximaxim.codekeeper.mainapp/product/rcp/target/products/${{ env.WINDOWS_BUILD }}
             ${{ github.workspace }}/ru.taximaxim.codekeeper.mainapp/product/rcp/target/products/${{ env.MACOS_AARCH_BUILD }}
             ${{ github.workspace }}/ru.taximaxim.codekeeper.mainapp/product/rcp/target/products/${{ env.MACOS_X86_BUILD }}
             ${{ github.workspace }}/ru.taximaxim.codekeeper.mainapp/updatesite/target/${{ env.UPDATESITE }}
-
-      - name: clean update folder
-        run: |
-          cd ${{ github.workspace }}/pgcodekeeper.github.io/update
-          find . ! -name index.html -delete
-
-      - name: copy updatesite
-        run: cp -R ${{ github.workspace }}/ru.taximaxim.codekeeper.mainapp/updatesite/target/repository/ ${{ github.workspace }}/pgcodekeeper.github.io/update/
-
-      - name: git commands
-        run: |
-          cd ${{ github.workspace }}/pgcodekeeper.github.io/
-          git add update
-          git commit -m "Deploy ${{ env.RELEASE_VERSION }} into update site"
-          git push origin HEAD

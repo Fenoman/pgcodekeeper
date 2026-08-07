@@ -27,6 +27,7 @@ import org.osgi.framework.BundleContext;
 import org.pgcodekeeper.core.database.api.schema.DbObjType;
 
 import ru.taximaxim.codekeeper.ui.reports.EclipseEnvironment;
+import ru.taximaxim.codekeeper.ui.views.navigator.PartitionTreeRefresher;
 
 public class Activator extends AbstractUIPlugin {
 
@@ -86,10 +87,15 @@ public class Activator extends AbstractUIPlugin {
         super.start(bundleContext);
         Activator.context = bundleContext;
         plugin = this;
+        PerformanceTelemetry.start();
+        HeapDumpConfiguration.configure();
+        PartitionTreeRefresher.start();
     }
 
     @Override
     public void stop(BundleContext bundleContext) throws Exception {
+        PartitionTreeRefresher.stop();
+        PerformanceTelemetry.stop();
         Activator.context = null;
         plugin = null;
         super.stop(bundleContext);

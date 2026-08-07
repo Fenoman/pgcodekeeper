@@ -13,6 +13,8 @@
 
     <groupId>ru.taximaxim.codeKeeper</groupId>
     <artifactId>ru.taximaxim.codekeeper.updatesite</artifactId>
+    <!-- eclipse-repository versions must be valid OSGi versions. -->
+    <version>15.2.0.neo1</version>
     <packaging>eclipse-repository</packaging>
 
     <build>
@@ -23,7 +25,7 @@
                 <version>${tycho.version}</version>
                 <configuration>
                     <repositoryName>pgCodeKeeper</repositoryName>
-                    <finalName>pgCodeKeeper-updatesite-${unqualifiedVersion}</finalName>
+                    <finalName>pgCodeKeeper-updatesite-${revision}</finalName>
                 </configuration>
             </plugin>
         </plugins>

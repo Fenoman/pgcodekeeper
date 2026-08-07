@@ -15,7 +15,90 @@ A tool for easier PostgreSQL development.
 
 pgCodeKeeper requires Java (JRE) 21+ to run.
 
-If you already have Eclipse IDE installed you can [install](https://pgcodekeeper.readthedocs.io/en/latest/installation.html) pgCodeKeeper plugin using Marketplace or `https://pgcodekeeper.org/update/` update site.
+The standalone archives include a Java 21 runtime and do not require a
+separate Java installation.
+
+Use a standalone `neo` archive from this repository's release artifacts. To
+install into an existing Eclipse IDE, use the locally built
+`pgCodeKeeper-updatesite-<release-version>.zip`. The public Marketplace and upstream
+update site distribute the upstream plugin without the `neo` optimizations.
+
+### Low-traffic PostgreSQL comparisons
+
+Persistent PostgreSQL catalog row caching is enabled by default in the Eclipse
+plugin to minimize the network traffic and the number of round trips repeated
+comparisons need. That is what dominates the wall-clock time of a comparison
+over a slow or high-latency link, a VPN among them. The first comparison
+populates the local cache and may take longer. The cache survives application
+restarts when the same Eclipse workspace is used. With a valid warm cache,
+later comparisons normally transfer a compact hash list and only catalog rows
+that are new or changed. Cache errors or an excessive miss ratio safely fall
+back to loading the full catalog rows.
+
+Parser worker defaults scale with the machine and are identical in the
+standalone application and in the plug-in installed into another Eclipse:
+half of the available processors, never fewer than two and never more than
+eight. On the twelve-CPU machine used for the measurements that is six workers
+for PostgreSQL Get Changes and six for project indexing, which is exactly the
+tuning the standalone product used to hard-code; eight workers were slower in
+that workload. The standalone JVM starts with a 256 MiB heap and may grow up to
+the 4 GiB `-Xmx` cap; the cap does not eagerly allocate 4 GiB.
+
+The cache may be disabled in `Window -> Preferences -> pgCodeKeeper` or in the
+overriding project properties. This Eclipse default does not change the generic
+Core and CLI defaults.
+
+The same preference page shows the persistent catalog cache folder and its
+size on disk, and clears it on demand. The size is measured in the background,
+and clearing removes only pgCodeKeeper's own per-database cache folders, under
+the same lock the automatic maintenance uses, so it is safe while another
+workspace is running.
+
+### Where a setting comes from
+
+Three levels are read, from the weakest to the strongest:
+
+1. **Plug-in defaults** - computed in `PreferenceInitializer`, shared by every
+   deployment. All performance tuning lives here.
+2. **Workspace preferences** - `Window -> Preferences -> pgCodeKeeper`. A value
+   entered here wins over the default for every project in the workspace.
+3. **Project preferences** - `Project -> Properties -> pgCodeKeeper`, stored in
+   the project's own `.settings/ru.taximaxim.codekeeper.ui.prefs`. They are
+   ignored until *Enable project settings* is checked in those properties
+   (`prefEnableProjPrefRoot=true`); once enabled, every key present in that file
+   wins over the workspace value, and keys that are absent keep inheriting it.
+
+The standalone product's `plugin_customization.ini` is deliberately not a fourth
+level for pgCodeKeeper tuning. Product customization outranks the plug-in
+defaults, so a value placed there would silently apply to the standalone
+application only - which is exactly how the tuning used to miss everyone running
+pgCodeKeeper inside their own Eclipse. The file now carries only
+`org.eclipse.core.resources/refresh.enabled`, a workspace-wide switch of another
+bundle that the standalone product may set for its own workspace but a plug-in
+must not set inside somebody else's IDE.
+
+Project-specific settings belong in the project file, not in the defaults. The
+schema exclusion list is the typical case: a scratch schema that one DDL
+repository generates must not be excluded from indexing for every other user.
+Committing `.settings/ru.taximaxim.codekeeper.ui.prefs` with
+`prefEnableProjPrefRoot=true` and `projectIndexExcludedSchemas=<schema>` gives
+the whole team the same setting, and because the resolved exclusion list is part
+of the project-index identity, every checkout that receives the file rebuilds
+its index once and then converges.
+
+The standalone application also persists its packed background project index
+inside the Eclipse workspace. After one successful full build, the same
+workspace can reopen that index after an application restart and reparse only a
+safe single-file change. Workspace auto-refresh is enabled so changes made by
+Git or external editors reach the incremental builder. Unsupported layouts,
+stale inputs, analysis errors, or damaged cache data fall back to a full build.
+
+Index publication is atomic and checksum covered on every platform. Windows
+does not expose directory handles to Java, so the directory entry of a freshly
+published index cannot be forced to disk there. After an operating-system
+crash or power loss on Windows the workspace may therefore rebuild the project
+index from scratch on the next start. That is expected behavior, not a damaged
+index: a partially published generation can never be opened.
 
 ## Documentation
 
@@ -24,15 +107,28 @@ If you already have Eclipse IDE installed you can [install](https://pgcodekeeper
 
 ## Build
 
-Build requires Java (JDK) 21+ and Apache Maven 3.9+.
+Build requires Java (JDK) 21+ and Apache Maven 3.9+. The optimized Eclipse
+bundle uses Core `15.2.0-neo1`, so install that artifact first.
 
 ```sh
-git clone https://github.com/pgcodekeeper/pgcodekeeper.git
+MAVEN_REPO="$(mktemp -d)"
+
+git clone --branch neo https://github.com/Fenoman/pgcodekeeper-core.git
+cd pgcodekeeper-core
+git checkout c106361b9223cac67f66785f0c3ff6cd9fe21c2a
+mvn -B -ntp clean install -DskipTests -Dmaven.repo.local="$MAVEN_REPO"
+cd ..
+
+git clone --branch neo https://github.com/Fenoman/pgcodekeeper.git
 cd pgcodekeeper
-mvn clean verify -DskipTests
+mvn -B -ntp clean verify -DskipTests -Dmaven.repo.local="$MAVEN_REPO"
 ```
 
-Binaries will be created in `ru.taximaxim.codekeeper.mainapp/product/rcp/target/products`  
+CI pins Core to immutable commit
+`c106361b9223cac67f66785f0c3ff6cd9fe21c2a`; changing the `neo` branch does
+not silently change a plugin build. Standalone archives for Linux, Windows,
+macOS x86_64, and macOS aarch64 are created in
+`ru.taximaxim.codekeeper.mainapp/product/rcp/target/products`.
 
 ## Notes
 

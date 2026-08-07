@@ -5,8 +5,9 @@
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 
 <!--
-    Use /script/update-version.sh X.Y.Z
-    to update all relevant poms and metadatas
+    Use script/update-version.sh X.Y.Z (or update-version.bat on Windows)
+    to update the Eclipse release identity. The external Core SHA/version pin
+    is maintained separately and remains fail-closed in CI.
 -->
 
     <modelVersion>4.0.0</modelVersion>
@@ -26,12 +27,11 @@
 
     <properties>
         <java.version>21</java.version>
-        <revision>15.3.0-SNAPSHOT</revision>
+        <revision>15.3.0-neo1</revision>
 
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <target.definition.file>app</target.definition.file>
-
         <sonar.java.binaries>${project.build.directory}/classes</sonar.java.binaries>
         <sonar.java.source>${java.version}</sonar.java.source>
         <sonar.java.target>${java.version}</sonar.java.target>
@@ -176,6 +176,14 @@
                             <os>linux</os>
                             <ws>gtk</ws>
                             <arch>x86_64</arch>
+                        </environment>
+                        <!-- the tests of this plugin need an OSGi runtime for the
+                             machine they run on, and a Linux on Apple silicon is
+                             where they are run now, so the platform must know it -->
+                        <environment>
+                            <os>linux</os>
+                            <ws>gtk</ws>
+                            <arch>aarch64</arch>
                         </environment>
                         <environment>
                             <os>macosx</os>

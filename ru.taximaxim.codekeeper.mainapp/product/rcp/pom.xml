@@ -12,21 +12,24 @@
 
     <groupId>ru.taximaxim.codeKeeper</groupId>
     <artifactId>ru.taximaxim.codekeeper.rcp.product</artifactId>
-    <version>15.3.0-SNAPSHOT</version>
+    <!-- eclipse-repository versions must be valid OSGi versions. -->
+    <version>15.3.0.neo1</version>
     <packaging>eclipse-repository</packaging>
 
     <repositories>
         <repository>
             <id>eclipse-p2-repo</id>
-            <url>https://download.eclipse.org/releases/latest/</url>
+            <url>https://download.eclipse.org/releases/2026-06</url>
+            <layout>p2</layout>
+        </repository>
+        <repository>
+            <id>justj-jre-21</id>
+            <url>https://download.eclipse.org/justj/jres/21/updates/release/21.0.11</url>
             <layout>p2</layout>
         </repository>
     </repositories>
 
     <properties>
-        <mac.jre.base>https://github.com/adoptium/temurin21-binaries/releases/download</mac.jre.base>
-        <mac.jre.x86>${mac.jre.base}/jdk-21.0.11%2B10/OpenJDK21U-jre_x64_mac_hotspot_21.0.11_10.tar.gz</mac.jre.x86>
-        <mac.jre.aarch64>${mac.jre.base}/jdk-21.0.11%2B10/OpenJDK21U-jre_aarch64_mac_hotspot_21.0.11_10.tar.gz</mac.jre.aarch64>
         <mac.folder>${project.build.directory}/products/ru.taximaxim.codekeeper.rcp.product/macosx/cocoa</mac.folder>
     </properties>
 
@@ -91,42 +94,12 @@
     <build>
         <plugins>
             <plugin>
-                <groupId>com.googlecode.maven-download-plugin</groupId>
-                <artifactId>download-maven-plugin</artifactId>
-                <version>1.13.0</version>
-                <executions>
-                    <execution>
-                        <id>download-x86</id>
-                        <phase>process-resources</phase>
-                        <goals>
-                            <goal>wget</goal>
-                        </goals>
-                        <configuration>
-                            <url>${mac.jre.x86}</url>
-                            <outputDirectory>${mac.folder}</outputDirectory>
-                            <outputFileName>x64.tar.gz</outputFileName>
-                        </configuration>
-                    </execution>
-                    <execution>
-                        <id>download-aarch64</id>
-                        <phase>process-resources</phase>
-                        <goals>
-                            <goal>wget</goal>
-                        </goals>
-                        <configuration>
-                            <url>${mac.jre.aarch64}</url>
-                            <outputDirectory>${mac.folder}</outputDirectory>
-                            <outputFileName>aarch64.tar.gz</outputFileName>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
-
-            <plugin>
                 <groupId>org.eclipse.tycho</groupId>
                 <artifactId>target-platform-configuration</artifactId>
                 <version>${tycho.version}</version>
                 <configuration>
+                    <!-- Explicit JustJ feature supplies the real Java capabilities. -->
+                    <executionEnvironment>none</executionEnvironment>
                     <environments>
                         <environment>
                             <os>win32</os>
@@ -137,6 +110,13 @@
                             <os>linux</os>
                             <ws>gtk</ws>
                             <arch>x86_64</arch>
+                        </environment>
+                        <!-- kept in step with the platform of the parent pom: this
+                             list is what decides which archives are produced -->
+                        <environment>
+                            <os>linux</os>
+                            <ws>gtk</ws>
+                            <arch>aarch64</arch>
                         </environment>
                         <environment>
                             <os>macosx</os>
@@ -157,6 +137,7 @@
                 <artifactId>tycho-p2-director-plugin</artifactId>
                 <version>${tycho.version}</version>
                 <configuration>
+                    <productRepository>https://download.eclipse.org/justj/jres/21/updates/release/21.0.11</productRepository>
                     <formats>
                         <win32>zip</win32>
                         <linux>tar.gz</linux>
@@ -165,10 +146,11 @@
                     <products>
                         <product>
                             <id>ru.taximaxim.codekeeper.rcp.product</id>
+                            <rootFolder>pgcodekeeper</rootFolder>
                             <rootFolders>
-                                <macosx>Pgcodekeeper.app</macosx>
+                                <macosx>pgCodeKeeper.app</macosx>
                             </rootFolders>
-                            <archiveFileName>pgCodeKeeper-${unqualifiedVersion}</archiveFileName>
+                            <archiveFileName>pgCodeKeeper-${revision}</archiveFileName>
                         </product>
                     </products>
                 </configuration>
@@ -190,41 +172,6 @@
                 </executions>
             </plugin>
 
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-antrun-plugin</artifactId>
-                <version>3.2.0</version>
-                <executions>
-                    <execution>
-                        <id>prepare</id>
-                        <phase>prepare-package</phase>
-                        <configuration>
-                            <target>
-                                <gunzip src="${mac.folder}/aarch64.tar.gz"
-                                        dest="${mac.folder}/aarch64.tar"/>
-                                <untar src="${mac.folder}/aarch64.tar"
-                                       dest="${mac.folder}/jre_aarch64/"
-                                       compression="none"/>
-                                <copy todir="${mac.folder}/aarch64/Pgcodekeeper.app/Contents/Eclipse/jre">
-                                      <fileset dir="${mac.folder}/jre_aarch64/jdk-21.0.11+10-jre"/>
-                                </copy>
-
-                                <gunzip src="${mac.folder}/x64.tar.gz"
-                                        dest="${mac.folder}/x64.tar"/>
-                                <untar src="${mac.folder}/x64.tar"
-                                       dest="${mac.folder}/jre_x64_mac/"
-                                       compression="none"/>
-                                <copy todir="${mac.folder}/x86_64/Pgcodekeeper.app/Contents/Eclipse/jre">
-                                      <fileset dir="${mac.folder}/jre_x64_mac/jdk-21.0.11+10-jre"/>
-                                </copy>
-                            </target>
-                        </configuration>
-                        <goals>
-                            <goal>run</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
         </plugins>
     </build>
 </project>

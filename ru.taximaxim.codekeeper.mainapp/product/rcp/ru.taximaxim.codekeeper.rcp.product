@@ -1,17 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <?pde version="3.5"?>
 
-<product name="pgCodeKeeper" uid="ru.taximaxim.codekeeper.rcp.product" id="ru.taximaxim.codekeeper.mainapp.product" application="org.eclipse.ui.ide.workbench" version="15.3.0.qualifier" useFeatures="true" includeLaunchers="true">
+<product name="pgCodeKeeper" uid="ru.taximaxim.codekeeper.rcp.product" id="ru.taximaxim.codekeeper.mainapp.product" application="org.eclipse.ui.ide.workbench" version="15.3.0.neo1" useFeatures="true" includeLaunchers="true">
 
    <configIni use="default">
    </configIni>
 
    <launcherArgs>
-      <programArgsMac>-vm ../Eclipse/jre/Contents/Home/lib/libjli.dylib</programArgsMac>
       <vmArgs>-Dosgi.requiredJavaVersion=21
+-Declipse.log.level=WARNING
 -XX:+UseG1GC
--Xms512m
--Xmx2048m
+-Xms256m
+-Xmx4096m
+-XX:+HeapDumpOnOutOfMemoryError
       </vmArgs>
       <vmArgsMac>-XstartOnFirstThread
 -Dorg.eclipse.swt.internal.carbon.smallFonts
@@ -221,6 +222,7 @@
       <feature id="org.eclipse.egit" installMode="root"/>
       <feature id="org.eclipse.epp.mpc" installMode="root"/>
       <feature id="ru.taximaxim.codekeeper.feature" installMode="root"/>
+      <feature id="org.eclipse.justj.openjdk.hotspot.jre.minimal" installMode="root"/>
    </features>
 
    <configurations>
@@ -234,8 +236,7 @@
    </configurations>
 
    <repositories>
-      <repository location="https://download.eclipse.org/releases/latest/" enabled="true" />
-      <repository location="https://pgcodekeeper.org/update/" enabled="true" />
+      <repository location="https://download.eclipse.org/releases/2026-06" enabled="true" />
       <repository location="https://download.eclipse.org/egit/updates/" enabled="true" />
    </repositories>
 

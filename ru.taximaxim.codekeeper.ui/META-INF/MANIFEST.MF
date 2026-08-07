@@ -2,7 +2,7 @@ Manifest-Version: 1.0
 Bundle-ManifestVersion: 2
 Bundle-Name: %Bundle-Name
 Bundle-SymbolicName: ru.taximaxim.codekeeper.ui;singleton:=true
-Bundle-Version: 15.3.0.qualifier
+Bundle-Version: 15.3.0.neo1
 Bundle-Activator: ru.taximaxim.codekeeper.ui.Activator
 Require-Bundle: ru.taximaxim.codekeeper.mainapp,
  org.eclipse.compare;bundle-version="[3.7.0,4.0.0)",
@@ -10,6 +10,8 @@ Require-Bundle: ru.taximaxim.codekeeper.mainapp,
  org.eclipse.core.filesystem;bundle-version="[1.7.0,2.0.0)",
  org.eclipse.core.resources;bundle-version="[3.13.0,4.0.0)",
  org.eclipse.core.runtime;bundle-version="[3.18.0,4.0.0)",
+ org.eclipse.e4.ui.model.workbench;bundle-version="[2.4.0,3.0.0)",
+ org.eclipse.e4.ui.workbench;bundle-version="[1.15.0,2.0.0)",
  org.eclipse.equinox.security;bundle-version="[1.3.0,2.0.0)",
  org.eclipse.jface;bundle-version="[3.20.0,4.0.0)",
  org.eclipse.jface.text;bundle-version="[3.16.0,4.0.0)",
@@ -30,7 +32,8 @@ Require-Bundle: ru.taximaxim.codekeeper.mainapp,
  org.eclipse.zest.core;bundle-version="[1.5.0,2.0.0)",
  org.eclipse.zest.layouts;bundle-version="[1.1.0,3.0.0)",
  wrapped.com.github.technology16.pgpass;bundle-version="[2.0.1,3.0.0)",
- org.pgcodekeeper.core;bundle-version="[15.0.0,16.0.0)",
+ org.pgcodekeeper.core;bundle-version="[15.2.0.neo1,16.0.0)",
+ org.antlr.antlr4-runtime;bundle-version="[4.13.1,5.0.0)",
  lz4-java;bundle-version="[1.8.0,2.0.0)",
  slf4j.api;bundle-version="[2.0.17,3.0.0)",
  com.google.guava;bundle-version="[33.4.6,34.0.0)",
@@ -40,6 +43,7 @@ Require-Bundle: ru.taximaxim.codekeeper.mainapp,
  wrapped-click.com.clickhouse.jdbc-v2;bundle-version="[0.9.4,1.0.0)",
  wrapped-click.com.clickhouse.client-v2;bundle-version="[0.9.4,1.0.0)",
  wrapped-click.com.clickhouse.clickhouse-client;bundle-version="[0.9.4,1.0.0)"
+Import-Package: com.sun.management;resolution:=optional
 Bundle-RequiredExecutionEnvironment: JavaSE-21
 Bundle-ActivationPolicy: lazy
 Bundle-ClassPath: .

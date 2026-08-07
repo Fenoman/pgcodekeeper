@@ -2,7 +2,13 @@ name: pull request
 
 on:
   pull_request:
-    branches: [ master ]
+    branches: [ master, neo ]
+
+permissions:
+  contents: read
+
+env:
+  PGCK_MAVEN_REPO: ${{ github.workspace }}/.pgck-m2-${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
   build:
@@ -11,10 +17,41 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - name: Set up JDK 21
+    - name: set up JDK 21
       uses: actions/setup-java@v4
       with:
         distribution: 'temurin'
         java-version: '21'
+    - name: resolve optimized Core pin
+      run: grep -E '^[A-Z][A-Z0-9_]*=' .github/core-ref.env >> "$GITHUB_ENV"
+    - name: checkout optimized Core
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ env.PGCK_CORE_REPOSITORY }}
+        ref: ${{ env.PGCK_CORE_REF }}
+        path: pgcodekeeper-core
+        persist-credentials: false
+    - name: verify release sources
+      run: |
+        python3 -B -m unittest script/test_verify_eclipse_packaging.py
+        python3 -B script/verify-eclipse-packaging.py
+    - name: install optimized Core
+      run: mvn -B -ntp -f pgcodekeeper-core/pom.xml clean install -DskipTests -Dmaven.repo.local="${PGCK_MAVEN_REPO}"
     - name: build with maven
-      run: mvn -B verify --file pom.xml
+      run: |
+        set -o pipefail
+        run_build() {
+          xvfb-run -a mvn -B -ntp verify --file pom.xml -Dmaven.repo.local="${PGCK_MAVEN_REPO}" 2>&1 \
+            | tee "${RUNNER_TEMP}/build.log"
+        }
+        if run_build; then
+          exit 0
+        fi
+        # A first clean isolated-repo reactor can lose a freshly built mainapp artifact
+        # before assemble-repository reads it. Retry that one failure exactly once.
+        if grep -q 'points to a non existing file' "${RUNNER_TEMP}/build.log"; then
+          echo '::warning::retrying the known transient Tycho reactor failure once'
+          run_build
+        else
+          exit 1
+        fi
