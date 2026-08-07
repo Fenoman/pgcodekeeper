@@ -1,0 +1,94 @@
+/*******************************************************************************
+ * Copyright 2017-2026 TAXTELECOM, LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *******************************************************************************/
+package ru.taximaxim.codekeeper.ui.editors;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import org.junit.jupiter.api.Test;
+import org.pgcodekeeper.core.api.ComparisonDepth;
+
+/**
+ * {@link ProjectEditorDiffer#getChanges()} decides {@code loadedDepth} - and
+ * therefore what {@link ProjectEditorDiffer#diff()}'s guard sees as {@code
+ * comparisonDepth} - along a three-way branch that no SWTBot test can reach
+ * headless. Only the second half is worth pinning down here: a run the
+ * reusable pipeline served is always {@link ComparisonDepth#FULL}, a bare
+ * constant assigned at that one call site with nothing to decide. The other
+ * half, extracted as {@link ProjectEditorDiffer#plainLoaderDepth}, is a real
+ * decision between two loader paths and is pinned down below.
+ * <p>
+ * The guard that reads the answer is pinned down here too. {@link
+ * ProjectEditorDiffer#scriptNeedsFullReload} is the whole of what keeps a
+ * structurally loaded model out of a migration script, and nothing else claims
+ * it: rewriting its condition into one that can never be true at that point -
+ * which is what deleting the guard amounts to - leaves forty-one tests across
+ * five other classes green.
+ */
+class ProjectEditorDifferLoadedDepthTest {
+
+    @Test
+    void theDepthAwareEntryPointHonorsWhateverWasRequested() {
+        assertEquals(ComparisonDepth.FULL,
+                ProjectEditorDiffer.plainLoaderDepth(true, ComparisonDepth.FULL));
+        assertEquals(ComparisonDepth.STRUCTURAL_ONLY,
+                ProjectEditorDiffer.plainLoaderDepth(true, ComparisonDepth.STRUCTURAL_ONLY));
+    }
+
+    @Test
+    void theLegacyPathIsAlwaysFullRegardlessOfWhatWasRequested() {
+        assertEquals(ComparisonDepth.FULL,
+                ProjectEditorDiffer.plainLoaderDepth(false, ComparisonDepth.FULL));
+        assertEquals(ComparisonDepth.FULL,
+                ProjectEditorDiffer.plainLoaderDepth(false, ComparisonDepth.STRUCTURAL_ONLY),
+                "the legacy path predates ComparisonDepth and always analyzes both sides");
+    }
+
+    /**
+     * Both states of the guard, in one place, because only the pair says
+     * anything: a guard that always demands a reload is as broken as one that
+     * never does - it would send every single Get Changes through a second
+     * full comparison before any script at all.
+     * <p>
+     * What a structural load actually costs a script is measured elsewhere:
+     * {@code ReceiveOnlyModeTest.aScriptIsNeverBuiltFromAStructuralLoad}
+     * builds one from each depth and shows the two differ.
+     */
+    @Test
+    void aScriptIsBuiltOnlyFromAComparisonThatResolvedItsDependencies() {
+        assertFalse(ProjectEditorDiffer.scriptNeedsFullReload(
+                ComparisonDepth.FULL),
+                "a full comparison is exactly what a script is built from");
+        assertTrue(ProjectEditorDiffer.scriptNeedsFullReload(
+                ComparisonDepth.STRUCTURAL_ONLY),
+                "a model with no dependencies cannot order the statements of "
+                        + "a script and must be recomputed first");
+    }
+
+    /**
+     * The state neither constant describes. {@code resetRemoteChanged} clears
+     * the depth along with the models it belongs to, so a guard reading it
+     * then is being asked about a comparison that is not there - and answers
+     * the only safe thing.
+     */
+    @Test
+    void anAbsentComparisonIsNotAScriptEither() {
+        assertTrue(ProjectEditorDiffer.scriptNeedsFullReload(null),
+                "no comparison is loaded at all, so there is nothing to "
+                        + "build a script from");
+    }
+}
