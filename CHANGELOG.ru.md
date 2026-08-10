@@ -13,6 +13,12 @@
 
 ### Исправлено
 
+## [15.2.0] - 2026-08-10
+
+### Исправлено
+
+- Исправлены ложные различия при сравнении объектов библиотек с включенной опцией «игнорировать привилегии».
+
 ## [15.1.0] - 2026-07-30
 
 ### Добавлено
@@ -2555,7 +2561,8 @@
 
 - Добавлен парсинг ORDER BY для агрегатных функции.
 
-[Новое]: https://github.com/pgcodekeeper/pgcodekeeper/compare/v15.1.0...HEAD
+[Новое]: https://github.com/pgcodekeeper/pgcodekeeper/compare/v15.2.0...HEAD
+[15.2.0]: https://github.com/pgcodekeeper/pgcodekeeper/compare/v15.1.0...v15.2.0
 [15.1.0]: https://github.com/pgcodekeeper/pgcodekeeper/compare/v15.0.0...15.1.0
 [15.0.0]: https://github.com/pgcodekeeper/pgcodekeeper/compare/v14.7.0...15.0.0
 [14.7.0]: https://github.com/pgcodekeeper/pgcodekeeper/compare/v14.6.0...14.7.0
