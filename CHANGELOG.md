@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ### Fixed
 
+## [15.2.0] - 2026-08-10
+
+### Fixed
+
+- Fixed false differences when comparing library objects with the "ignore privileges" option enabled.
+
 ## [15.1.0] - 2026-07-30
 
 ### Added
@@ -2555,7 +2561,8 @@ We increment major version in this release due to decision to shift our developm
 
 - ORDER BY parsing has been added to the aggregate functions.
 
-[Unreleased]: https://github.com/pgcodekeeper/pgcodekeeper/compare/v15.1.0...HEAD
+[Unreleased]: https://github.com/pgcodekeeper/pgcodekeeper/compare/v15.2.0...HEAD
+[15.2.0]: https://github.com/pgcodekeeper/pgcodekeeper/compare/v15.1.0...v15.2.0
 [15.1.0]: https://github.com/pgcodekeeper/pgcodekeeper/compare/v15.0.0...15.1.0
 [15.0.0]: https://github.com/pgcodekeeper/pgcodekeeper/compare/v14.7.0...15.0.0
 [14.7.0]: https://github.com/pgcodekeeper/pgcodekeeper/compare/v14.6.0...14.7.0
