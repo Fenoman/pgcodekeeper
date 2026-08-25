@@ -13,6 +13,16 @@
 
 ### Исправлено
 
+## [15.3.0] - 2026-08-25
+
+### Добавлено
+
+- Добавлено формирование скрипта миграции с учетом версии PostgreSQL при включенной настройки `Использовать синтаксис текущей версии базы данных для генерации скрипта миграции`.
+
+### Исправлено
+
+- Исправлен конфликт при чтении файла схемы при обработке отдельных файлов проекта.
+
 ## [15.2.0] - 2026-08-10
 
 ### Исправлено
@@ -2561,7 +2571,8 @@
 
 - Добавлен парсинг ORDER BY для агрегатных функции.
 
-[Новое]: https://github.com/pgcodekeeper/pgcodekeeper/compare/v15.2.0...HEAD
+[Новое]: https://github.com/pgcodekeeper/pgcodekeeper/compare/v15.3.0...HEAD
+[15.3.0]: https://github.com/pgcodekeeper/pgcodekeeper/compare/v15.2.0...v15.3.0
 [15.2.0]: https://github.com/pgcodekeeper/pgcodekeeper/compare/v15.1.0...v15.2.0
 [15.1.0]: https://github.com/pgcodekeeper/pgcodekeeper/compare/v15.0.0...15.1.0
 [15.0.0]: https://github.com/pgcodekeeper/pgcodekeeper/compare/v14.7.0...15.0.0
