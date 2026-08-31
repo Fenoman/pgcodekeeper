@@ -159,7 +159,13 @@ class IncrementalParsedDefinitionShapeTest {
         // Every meta kind the shape hasher knows takes part: statements,
         // relations, functions, composite types, constraints, operators and
         // casts, including partitioned and inheriting tables.
-        assertEquals(38, shaped);
+        //
+        // Nine, not eighteen, schema definitions: upstream 15.3.0 (DBTOOLS-2178)
+        // stopped registering the schema of a single-file parse as a definition of
+        // its own - in SINGLE mode the schema is taken from the database instead.
+        // Each of the nine corpus entries opens with CREATE SCHEMA, so the total
+        // dropped by exactly nine. The kinds this test is about are unaffected.
+        assertEquals(29, shaped);
     }
 
     /**
