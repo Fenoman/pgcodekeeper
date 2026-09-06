@@ -43,6 +43,8 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -54,6 +56,9 @@ import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.runtime.NullProgressMonitor;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.stubbing.Answer;
 import org.pgcodekeeper.core.api.ComparisonDepth;
 import org.pgcodekeeper.core.database.api.IDatabaseProvider;
@@ -382,11 +387,12 @@ class ReusableProjectComparisonTest {
         }
     }
 
-    @Test
+    @ParameterizedTest
+    @EnumSource(ComparisonDepth.class)
     void effectiveVersionMismatchRetriesColdExactlyOnceAndClosesRemoteLoaders(
-            @TempDir Path root) throws Exception {
+            ComparisonDepth depth, @TempDir Path root) throws Exception {
         try (var fixture = new ReusableFixture(
-                root.resolve("version-mismatch"))) {
+                root.resolve("version-mismatch"), depth)) {
             verify(fixture.seed(PgSupportedVersion.VERSION_16))
                     .close();
             var creates = new AtomicInteger();
@@ -462,11 +468,12 @@ class ReusableProjectComparisonTest {
         }
     }
 
-    @Test
+    @ParameterizedTest
+    @EnumSource(ComparisonDepth.class)
     void retainedDisplayLeaseOutlivesTheDiffThatProducedIt(
-            @TempDir Path root) throws Exception {
+            ComparisonDepth depth, @TempDir Path root) throws Exception {
         try (var fixture = new ReusableFixture(
-                root.resolve("lease-lifecycle"))) {
+                root.resolve("lease-lifecycle"), depth)) {
             Path remote = root.resolve("lease-remote.sql");
             Files.writeString(remote, "CREATE SCHEMA app;\n");
 
@@ -546,12 +553,13 @@ class ReusableProjectComparisonTest {
                 root.resolve("cancel-hash"), false);
     }
 
-    @Test
+    @ParameterizedTest
+    @EnumSource(ComparisonDepth.class)
     void cancellationDuringWarmRemoteLoadDoesNotRetryAndReleasesModelLease(
-            @TempDir Path root) throws Exception {
+            ComparisonDepth depth, @TempDir Path root) throws Exception {
         Thread.interrupted();
         try (var fixture = new ReusableFixture(
-                root.resolve("cancel-remote"))) {
+                root.resolve("cancel-remote"), depth)) {
             fixture.seed(PgSupportedVersion.VERSION_16);
             var creates = new AtomicInteger();
             var cancelledLoaders = new ArrayList<ILoader>();
@@ -666,9 +674,10 @@ class ReusableProjectComparisonTest {
         }
     }
 
-    @Test
+    @ParameterizedTest
+    @EnumSource(ComparisonDepth.class)
     void projectChangeDuringColdCaptureHasTypedCancellation(
-            @TempDir Path root) throws Exception {
+            ComparisonDepth depth, @TempDir Path root) throws Exception {
         var monitor = new NullProgressMonitor();
         IProject project = createProject(
                 root.resolve("cold-capture-race"), monitor); //$NON-NLS-1$
@@ -694,7 +703,7 @@ class ReusableProjectComparisonTest {
                             remoteFactory(provider, remote,
                                     new AtomicInteger()),
                             settings(monitor, telemetry),
-                            "project", "remote", monitor, false)); //$NON-NLS-1$ //$NON-NLS-2$
+                            "project", "remote", monitor, false, depth)); //$NON-NLS-1$ //$NON-NLS-2$
 
             assertEquals(ProjectInputChangeStage.FILE_SET,
                     failure.stage());
@@ -1109,46 +1118,346 @@ class ReusableProjectComparisonTest {
         }
     }
 
-    /**
-     * The sixth early exit: a request for anything but {@link
-     * ComparisonDepth#FULL} bypasses this pipeline before the cache is even
-     * consulted, so a receive-only comparison gets none of its cost - not
-     * NEW construction, not a cache lookup, nothing.
-     */
     @Test
-    void structuralDepthBypassesReusablePipelineBeforeTheCache(
+    void structuralComparisonsReuseTheProjectAndReloadChangedFiles(
             @TempDir Path root) throws Exception {
         var monitor = new NullProgressMonitor();
-        IProject project = createProject(
-                root.resolve("structural-only"), monitor);
+        IProject project = createProject(root.resolve("structural-only"), monitor);
+        var provider = new PgDatabaseProvider();
+        var creates = new AtomicInteger();
+        Path remote = root.resolve("remote.sql");
+        Files.writeString(remote, "CREATE SCHEMA app;\n");
         try (var reusable = new ReusableProjectComparison()) {
             writeProject(project);
-            var provider = new PgDatabaseProvider();
-            Path remote = root.resolve("remote.sql");
-            Files.writeString(remote,
-                    "CREATE SCHEMA app;\n");
-            var creates = new AtomicInteger();
-            var telemetry = mock(EclipseComparisonTelemetry.class);
+            Path projectRoot = project.getLocation().toFile().toPath();
+            var cold = reusable.load(project, DatabaseType.PG, provider,
+                    projectRoot, remoteFactory(provider, remote, creates),
+                    settings(monitor), "project", "remote", monitor, false,
+                    ComparisonDepth.STRUCTURAL_ONLY);
+            assertTrue(cold.isPresent(),
+                    "a structural comparison must retain its own parsed model");
+            var first = cold.orElseThrow();
+            IDatabase original = first.result().oldLoader().getDatabase();
+            assertTrue(original.getAnalysisLaunchers().isEmpty());
+            assertFalse(first.reused());
+            var published = first.publish();
+            assertTrue(published.accepted());
+            published.displayLease().orElseThrow().close();
 
-            assertTrue(reusable.load(
-                    project, DatabaseType.PG, provider,
-                    project.getLocation().toFile().toPath(),
-                    remoteFactory(provider, remote, creates),
-                    settings(monitor, telemetry), "project", "remote",
-                    monitor, false,
-                    ComparisonDepth.STRUCTURAL_ONLY).isEmpty());
+            Files.writeString(remote, "CREATE SCHEMA app; CREATE TABLE app.remote_only (id int);\n");
+            var warm = reusable.load(project, DatabaseType.PG, provider,
+                    projectRoot, remoteFactory(provider, remote, creates),
+                    settings(monitor), "project", "remote", monitor, false,
+                    ComparisonDepth.STRUCTURAL_ONLY).orElseThrow();
+            assertTrue(warm.reused());
+            assertSame(original, warm.result().oldLoader().getDatabase(),
+                    "unchanged SQL files must not be parsed into another model");
+            assertNotSame(first.result().newLoader().getDatabase(),
+                    warm.result().newLoader().getDatabase());
+            assertTrue(warm.result().newLoader().getDatabase().getAnalysisLaunchers().isEmpty());
+            warm.publish().displayLease().orElseThrow().close();
 
-            assertEquals(0, creates.get(),
-                    "a structural request must bypass before NEW is even "
-                            + "created");
-            verify(telemetry, times(1))
-                    .projectModelCacheFinished(
-                            eq(ProjectModelCacheStatus.MISS),
-                            eq(ProjectModelFailClosedReason.STRUCTURAL_ONLY),
-                            anyLong(), anyLong(), anyLong());
+            Files.writeString(projectRoot.resolve("SCHEMA/app/TABLE/item.sql"),
+                    "CREATE TABLE app.item (id bigint, changed text);\n");
+            project.refreshLocal(IResource.DEPTH_INFINITE, monitor);
+            var changed = reusable.load(project, DatabaseType.PG, provider,
+                    projectRoot, remoteFactory(provider, remote, creates),
+                    settings(monitor), "project", "remote", monitor, false,
+                    ComparisonDepth.STRUCTURAL_ONLY).orElseThrow();
+            assertFalse(changed.reused());
+            assertNotSame(original, changed.result().oldLoader().getDatabase());
+            var changedDatabase = (org.pgcodekeeper.core.database.pg.schema.PgDatabase)
+                    changed.result().oldLoader().getDatabase();
+            assertTrue(changedDatabase.getSchema("app").getTable("item")
+                    .getColumn("changed") != null);
+            changed.publish().displayLease().orElseThrow().close();
+            assertEquals(3, creates.get(), "NEW must be loaded on every comparison");
+            assertTrue(PgDbParser.getParserForBuilder(project, new int[] {
+                    IncrementalProjectBuilder.FULL_BUILD })
+                    .acquireValidatedProjectSnapshotLease(project, monitor).isEmpty(),
+                    "structural reuse must not build an analyzed reference index");
         } finally {
             cleanup(project, monitor);
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"same_metadata", "add", "remove", "rename"})
+    void structuralReuseValidatesEveryInputEvenWithoutAWorkspaceDelta(
+            String mutation, @TempDir Path root) throws Exception {
+        var monitor = new NullProgressMonitor();
+        IProject project = createProject(root.resolve(mutation), monitor);
+        var provider = new PgDatabaseProvider();
+        Path remote = root.resolve("remote.sql");
+        Files.writeString(remote, "CREATE SCHEMA app;");
+        try (var reusable = new ReusableProjectComparison()) {
+            writeProject(project);
+            Path table = project.getLocation().toFile().toPath()
+                    .resolve("SCHEMA/app/TABLE/item.sql");
+            Files.setLastModifiedTime(table, java.nio.file.attribute.FileTime
+                    .fromMillis(System.currentTimeMillis() - 60_000));
+            project.refreshLocal(IResource.DEPTH_INFINITE, monitor);
+            var first = loadStructural(reusable, project, provider, remote, monitor);
+            Object original = first.result().oldLoader().getDatabase();
+            first.publish().displayLease().orElseThrow().close();
+            switch (mutation) {
+            case "same_metadata" -> {
+                var timestamp = Files.getLastModifiedTime(table);
+                long length = Files.size(table);
+                Files.writeString(table, Files.readString(table).replace("bigint", "text  "));
+                Files.setLastModifiedTime(table, timestamp);
+                assertEquals(length, Files.size(table));
+                assertEquals(timestamp, Files.getLastModifiedTime(table));
+            }
+            case "add" -> Files.writeString(table.resolveSibling("extra.sql"),
+                    "CREATE TABLE app.extra (id int);");
+            case "remove" -> Files.delete(table);
+            case "rename" -> Files.move(table, table.resolveSibling("renamed.sql"));
+            default -> throw new AssertionError(mutation);
+            }
+            // Deliberately omit refreshLocal: raw file validation must detect
+            // external edits even before Eclipse broadcasts a resource delta.
+            var changed = loadStructural(reusable, project, provider, remote, monitor);
+            assertFalse(changed.reused());
+            assertNotSame(original, changed.result().oldLoader().getDatabase());
+            var fresh = UIComparisonLoader.loadModels(
+                    new org.pgcodekeeper.core.database.api.loader.ComparisonLoaderFactories(
+                            LoaderFactories.project(project.getLocation().toFile().toPath(),
+                                    settings -> provider.getProjectLoader(
+                                            project.getLocation().toFile().toPath(), settings)),
+                            remoteFactory(provider, remote, new AtomicInteger())),
+                    settings(monitor), ComparisonDepth.STRUCTURAL_ONLY);
+            assertEquals(structuralTree(fresh.oldDatabase()),
+                    structuralTree(changed.result().oldLoader().getDatabase()));
+            var publication = changed.publish();
+            assertTrue(publication.accepted());
+            publication.displayLease().ifPresent(ReusableProjectComparison.DisplayLease::close);
+            if ("rename".equals(mutation)) {
+                // Keeping the old declaration under a different filename
+                // produces a loader diagnostic. Reuse must not hide it.
+                assertFalse(changed.result().oldLoader().getErrors().isEmpty());
+                var repeated = loadStructural(reusable, project, provider, remote, monitor);
+                assertFalse(repeated.reused());
+                assertFalse(repeated.result().oldLoader().getErrors().isEmpty());
+                repeated.close();
+            }
+        } finally {
+            cleanup(project, monitor);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void changingComparisonDepthNeverReusesTheOtherModelKind(
+            boolean structuralFirst, @TempDir Path root) throws Exception {
+        var monitor = new NullProgressMonitor();
+        IProject project = createProject(root.resolve("depth-switch"), monitor);
+        var provider = new PgDatabaseProvider();
+        Path remote = root.resolve("remote.sql");
+        Files.writeString(remote, "CREATE SCHEMA app;");
+        try (var reusable = new ReusableProjectComparison()) {
+            writeProject(project);
+            PgDbParser.getParserForBuilder(project,
+                    new int[] {IncrementalProjectBuilder.FULL_BUILD})
+                    .prepareProjectIndex(project, monitor).update().commit(project.getName(), monitor);
+            ComparisonDepth firstDepth = structuralFirst
+                    ? ComparisonDepth.STRUCTURAL_ONLY : ComparisonDepth.FULL;
+            ComparisonDepth secondDepth = structuralFirst
+                    ? ComparisonDepth.FULL : ComparisonDepth.STRUCTURAL_ONLY;
+            Object previous = null;
+            var depths = List.of(firstDepth, secondDepth, secondDepth, firstDepth);
+            for (int i = 0; i < depths.size(); ++i) {
+                ComparisonDepth depth = depths.get(i);
+                var prepared = reusable.load(project, DatabaseType.PG, provider,
+                        project.getLocation().toFile().toPath(),
+                        remoteFactory(provider, remote, new AtomicInteger()),
+                        settings(monitor), "project", "remote", monitor, false, depth).orElseThrow();
+                assertEquals(depth, prepared.depth());
+                assertEquals(i == 2, prepared.reused(),
+                        "only consecutive comparisons at the same depth may reuse the model");
+                Object model = prepared.result().oldLoader().getDatabase();
+                if (prepared.reused()) {
+                    assertSame(previous, model);
+                } else if (previous != null) {
+                    assertNotSame(previous, model);
+                }
+                previous = model;
+                prepared.publish().displayLease().orElseThrow().close();
+            }
+        } finally {
+            cleanup(project, monitor);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void structuralInputValidationOverlapsRemoteLoading(boolean warmRun, @TempDir Path root)
+            throws Exception {
+        try (var fixture = new ReusableFixture(root.resolve("overlap"),
+                ComparisonDepth.STRUCTURAL_ONLY)) {
+            if (warmRun) {
+                fixture.seed(PgSupportedVersion.VERSION_16);
+            }
+            var remoteStarted = new CountDownLatch(1);
+            var inspectionStarted = new CountDownLatch(1);
+            var inspected = new AtomicInteger();
+            var loaderCreations = new AtomicInteger();
+            var remoteFinished = new AtomicBoolean();
+            IDatabaseProvider provider = mock(IDatabaseProvider.class);
+            when(provider.getProjectLoader(any(Path.class), any(ISettings.class),
+                    anyCollection(), anyCollection(), anyCollection(), any(Path.class)))
+                    .thenAnswer(invocation -> {
+                        IProjectLoader real = fixture.provider.getProjectLoader(
+                                invocation.getArgument(0), invocation.getArgument(1),
+                                invocation.getArgument(2), invocation.getArgument(3),
+                                invocation.getArgument(4), invocation.getArgument(5));
+                        if (loaderCreations.getAndIncrement() == 0 && !warmRun) {
+                            return real;
+                        }
+                        IProjectLoader loader = mock(IProjectLoader.class, delegatesTo(real));
+                        doAnswer(ignored -> {
+                            assertTrue(remoteStarted.await(3, TimeUnit.SECONDS),
+                                    "NEW must start before project file validation finishes");
+                            inspectionStarted.countDown();
+                            if (inspected.incrementAndGet() == 2) {
+                                assertTrue(remoteFinished.get(),
+                                        "The final file-set check must follow NEW completion");
+                            }
+                            return real.listInputFiles();
+                        }).when(loader).listInputFiles();
+                        return loader;
+                    });
+            var remote = trackingRemoteFactory(fixture.provider, PgSupportedVersion.VERSION_16,
+                    new AtomicInteger(), new ArrayList<>(), false);
+            var observedRemote = LoaderFactories.of(settings -> {
+                ILoader real = remote.create(settings);
+                ILoader loader = mock(ILoader.class, delegatesTo(real));
+                doAnswer(ignored -> {
+                    remoteStarted.countDown();
+                    assertTrue(inspectionStarted.await(3, TimeUnit.SECONDS),
+                            "Project file validation must start before NEW finishes");
+                    var database = real.load();
+                    remoteFinished.set(true);
+                    return database;
+                }).when(loader).load();
+                return loader;
+            });
+            var prepared = fixture.tryLoad(provider, observedRemote, settings(fixture.monitor)).orElseThrow();
+            assertEquals(warmRun, prepared.reused());
+            assertEquals(2, inspected.get());
+            prepared.close();
+        }
+    }
+
+    /**
+     * A warm run must not publish a project side that stopped describing the
+     * working tree while the database was loading. The edit here is written
+     * straight to disk and never refreshed, so no resource delta exists and the
+     * mutation epoch stays current: only the final enumeration can see it.
+     */
+    @Test
+    void warmFileSetChangeWhileTheDatabaseLoadsCancelsLikeACold(
+            @TempDir Path root) throws Exception {
+        try (var fixture = new ReusableFixture(root.resolve("warm-final-file-set"),
+                ComparisonDepth.STRUCTURAL_ONLY)) {
+            fixture.seed(PgSupportedVersion.VERSION_16);
+            Path table = fixture.projectRoot.resolve("SCHEMA/app/TABLE/item.sql");
+            var inspected = new AtomicInteger();
+            var remoteFinished = new AtomicBoolean();
+            var telemetry = mock(EclipseComparisonTelemetry.class);
+            IDatabaseProvider provider = mock(IDatabaseProvider.class);
+            when(provider.getProjectLoader(any(Path.class), any(ISettings.class),
+                    anyCollection(), anyCollection(), anyCollection(), any(Path.class)))
+                    .thenAnswer(invocation -> {
+                        IProjectLoader real = fixture.provider.getProjectLoader(
+                                invocation.getArgument(0), invocation.getArgument(1),
+                                invocation.getArgument(2), invocation.getArgument(3),
+                                invocation.getArgument(4), invocation.getArgument(5));
+                        IProjectLoader loader = mock(IProjectLoader.class, delegatesTo(real));
+                        doAnswer(ignored -> {
+                            if (inspected.incrementAndGet() == 2) {
+                                assertTrue(remoteFinished.get(),
+                                        "The final warm file-set check must follow NEW completion");
+                                Files.writeString(table,
+                                        "CREATE TABLE app.item (id bigint, changed text);\n");
+                            }
+                            return real.listInputFiles();
+                        }).when(loader).listInputFiles();
+                        return loader;
+                    });
+            var remote = trackingRemoteFactory(fixture.provider, PgSupportedVersion.VERSION_16,
+                    new AtomicInteger(), new ArrayList<>(), false);
+            var observedRemote = LoaderFactories.of(settings -> {
+                ILoader real = remote.create(settings);
+                ILoader loader = mock(ILoader.class, delegatesTo(real));
+                doAnswer(ignored -> {
+                    IDatabase database = real.load();
+                    remoteFinished.set(true);
+                    return database;
+                }).when(loader).load();
+                return loader;
+            });
+
+            ProjectInputsChangedException failure = assertThrows(
+                    ProjectInputsChangedException.class,
+                    () -> fixture.tryLoad(provider, observedRemote,
+                            settings(fixture.monitor, telemetry)));
+
+            assertEquals(ProjectInputChangeStage.FILE_SET, failure.stage());
+            assertEquals("SCHEMA/app/TABLE/item.sql",
+                    failure.relativePath().orElseThrow());
+            verify(telemetry).projectInputsChanged(ProjectInputChangeStage.FILE_SET);
+            assertEquals(2, inspected.get(),
+                    "one enumeration hashes on the OLD worker, one settles the file set");
+        }
+    }
+
+    @Test
+    void structuralPublicationRejectsChangesAfterValidation(@TempDir Path root) throws Exception {
+        var monitor = new NullProgressMonitor();
+        IProject project = createProject(root.resolve("publication"), monitor);
+        var provider = new PgDatabaseProvider();
+        Path remote = root.resolve("remote.sql");
+        Files.writeString(remote, "CREATE SCHEMA app;");
+        try (var reusable = new ReusableProjectComparison()) {
+            writeProject(project);
+            var prepared = loadStructural(reusable, project, provider, remote, monitor);
+            project.getFile("SCHEMA/app/TABLE/item.sql").setContents(
+                    new ByteArrayInputStream("CREATE TABLE app.item (id text);".getBytes(StandardCharsets.UTF_8)),
+                    IResource.FORCE, monitor);
+            assertFalse(prepared.isCurrent());
+            assertFalse(prepared.publish().accepted());
+            prepared.close();
+            var next = loadStructural(reusable, project, provider, remote, monitor);
+            assertFalse(next.reused());
+            next.close();
+        } finally {
+            cleanup(project, monitor);
+        }
+    }
+
+    private static ReusableProjectComparison.PreparedComparison loadStructural(
+            ReusableProjectComparison reusable, IProject project,
+            PgDatabaseProvider provider, Path remote, NullProgressMonitor monitor) throws Exception {
+        return reusable.load(project, DatabaseType.PG, provider,
+                project.getLocation().toFile().toPath(),
+                remoteFactory(provider, remote, new AtomicInteger()),
+                settings(monitor), "project", "remote", monitor, false,
+                ComparisonDepth.STRUCTURAL_ONLY).orElseThrow();
+    }
+
+    private static List<String> structuralTree(IDatabase database) {
+        var result = new ArrayList<String>();
+        var pg = (org.pgcodekeeper.core.database.pg.schema.PgDatabase) database;
+        for (var schema : pg.getSchemas()) {
+            for (var table : schema.getTables()) {
+                result.add(schema.getName() + "." + table.getName());
+                for (var column : table.getColumns()) {
+                    result.add(column.getName() + ":" + column.getType());
+                }
+            }
+        }
+        return result;
     }
 
     /**
@@ -1379,16 +1688,25 @@ class ReusableProjectComparisonTest {
         private final PgDatabaseProvider provider =
                 new PgDatabaseProvider();
         private final Path projectRoot;
+        private final ComparisonDepth depth;
         private final ReusableProjectComparison reusable =
                 new ReusableProjectComparison();
 
         private ReusableFixture(Path location)
                 throws Exception {
+            this(location, ComparisonDepth.FULL);
+        }
+
+        private ReusableFixture(Path location, ComparisonDepth depth)
+                throws Exception {
+            this.depth = depth;
             project = createProject(location, monitor);
             writeProject(project);
             projectRoot = project.getLocation()
                     .toFile().toPath();
-            reindex();
+            if (depth == ComparisonDepth.FULL) {
+                reindex();
+            }
         }
 
         /**
@@ -1428,7 +1746,7 @@ class ReusableProjectComparisonTest {
                     project, DatabaseType.PG,
                     projectProvider, projectRoot, remote,
                     comparisonSettings, "project", "remote",
-                    monitor, false);
+                    monitor, false, depth);
         }
 
         private ILoader seed(ISupportedVersion version)

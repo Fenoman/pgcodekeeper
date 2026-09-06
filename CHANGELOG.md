@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ### Changed
 
+- Repeated PostgreSQL `Get changes` reuses the structural model of an unchanged project to reduce CPU work. Every SQL file is checked by content, including external edits preserving file size and modification time. Project, settings or comparison-depth changes require a fresh load; the database is loaded on every run.
+- The first structural project comparison validates consumed files while the database is still loading. File hashing reuses one buffer per pass to reduce temporary allocations; final file-set and project-change checks still run after both sides finish.
 - PostgreSQL `Get changes` reduces memory use by omitting reference-location maps from comparison models. Dependency analysis, migration scripts and the SQL editor's navigation index are preserved.
 
 ## [15.3.0-neo1] - 2026-08-31

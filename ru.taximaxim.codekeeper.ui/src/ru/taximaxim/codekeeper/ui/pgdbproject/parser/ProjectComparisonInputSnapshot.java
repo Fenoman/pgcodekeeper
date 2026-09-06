@@ -85,8 +85,7 @@ final class ProjectComparisonInputSnapshot {
             BooleanSupplier cancelled)
             throws IOException, InterruptedException {
         Objects.requireNonNull(resolver, "resolver"); //$NON-NLS-1$
-        DigestReader reader = file -> ProjectIndexFiles.sha256(
-                file, resolver, cancelled);
+        DigestReader reader = ProjectIndexFiles.digestReader(resolver, cancelled);
         return validate(current, reader,
                 cancelled);
     }
@@ -97,6 +96,13 @@ final class ProjectComparisonInputSnapshot {
             throws IOException, InterruptedException {
         return ProjectIndexWarmValidator.validate(
                 files, current, digestReader, cancelled);
+    }
+
+    Result validateContent(List<CurrentFile> current,
+            ProjectIndexPathResolver resolver, BooleanSupplier cancelled)
+            throws IOException, InterruptedException {
+        return ProjectIndexWarmValidator.validateContent(files, current,
+                ProjectIndexFiles.digestReader(resolver, cancelled), cancelled);
     }
 
     int fileCount() {

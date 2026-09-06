@@ -21,6 +21,7 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -174,6 +175,67 @@ class ProjectIndexFilesTest {
                 () -> ProjectIndexFiles.hashAll(current,
                         path -> project.resolve(path.relativePath()).toString(),
                         cancelled::get));
+    }
+
+    @Test
+    void hashesDifferentSizesWithoutCarryingContentAcrossFiles(@TempDir Path temp)
+            throws Exception {
+        Path project = Files.createDirectories(temp.resolve("project"));
+        Path library = Files.createDirectories(temp.resolve("library"));
+        var contents = List.of("select 'данные';\n".repeat(20_000), "short", "",
+                "x".repeat(65_536), "y".repeat(65_537), "last");
+        var inputs = new java.util.ArrayList<Path>();
+        for (int i = 0; i < contents.size(); i++) {
+            inputs.add(write(project.resolve(i + ".sql"), contents.get(i)));
+        }
+        var current = ProjectIndexFiles.inspect(inputs, project, library, path -> 1);
+        var stamps = ProjectIndexFiles.hashAll(current,
+                path -> project.resolve(path.relativePath()).toString(), () -> false);
+
+        for (int i = 0; i < contents.size(); i++) {
+            Assertions.assertArrayEquals(sha256(contents.get(i)),
+                    stamps.get(i).contentSha256(), "File " + i);
+        }
+    }
+
+    @Test
+    void digestReaderResetsAfterPartialCancellation(@TempDir Path temp)
+            throws Exception {
+        Path project = Files.createDirectories(temp.resolve("project"));
+        Path library = Files.createDirectories(temp.resolve("library"));
+        Path large = write(project.resolve("large.sql"), "x".repeat(200_000));
+        Path small = write(project.resolve("small.sql"), "next");
+        var current = ProjectIndexFiles.inspect(List.of(large, small), project,
+                library, path -> 1);
+        var checks = new AtomicInteger();
+        var reader = ProjectIndexFiles.digestReader(
+                path -> project.resolve(path.relativePath()).toString(),
+                () -> checks.incrementAndGet() == 3);
+
+        Assertions.assertThrows(InterruptedException.class,
+                () -> reader.sha256(current.getFirst()));
+        Assertions.assertArrayEquals(sha256("next"), reader.sha256(current.get(1)));
+        Assertions.assertArrayEquals(sha256("x".repeat(200_000)),
+                reader.sha256(current.getFirst()));
+    }
+
+    @Test
+    void digestReaderResetsAfterReadFailure(@TempDir Path temp) throws Exception {
+        Path project = Files.createDirectories(temp.resolve("project"));
+        Path library = Files.createDirectories(temp.resolve("library"));
+        Path first = write(project.resolve("first.sql"), "first");
+        Path removed = write(project.resolve("removed.sql"), "removed");
+        Path empty = write(project.resolve("empty.sql"), "");
+        var current = ProjectIndexFiles.inspect(List.of(first, removed, empty),
+                project, library, path -> 1);
+        var reader = ProjectIndexFiles.digestReader(
+                path -> project.resolve(path.relativePath()).toString(), () -> false);
+        Files.delete(removed);
+
+        Assertions.assertArrayEquals(sha256("first"), reader.sha256(current.getFirst()));
+        Assertions.assertThrows(java.io.IOException.class,
+                () -> reader.sha256(current.get(1)));
+        Assertions.assertArrayEquals(sha256(""), reader.sha256(current.get(2)));
     }
 
     private static Path write(Path path, String value) throws Exception {

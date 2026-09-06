@@ -356,6 +356,8 @@ public final class PgDbParser implements IResourceChangeListener {
      * comparison results, including cold comparisons for which no index
      * snapshot is available.
      */
+    record ProjectMutationToken(PgDbParser parser, long configurationEpoch, long contentEpoch) { }
+
     public final class ProjectMutationLease implements AutoCloseable {
 
         private final long expectedConfigurationEpoch;
@@ -373,6 +375,11 @@ public final class PgDbParser implements IResourceChangeListener {
             synchronized (stateLock) {
                 return isCurrentLocked();
             }
+        }
+
+        ProjectMutationToken token() {
+            return new ProjectMutationToken(PgDbParser.this,
+                    expectedConfigurationEpoch, expectedContentEpoch);
         }
 
         /**
@@ -4634,6 +4641,11 @@ public final class PgDbParser implements IResourceChangeListener {
             startBuildJob(project);
         }
         return parser;
+    }
+
+    /** Returns the mutation tracker without restoring or building an index. */
+    static PgDbParser getParserForStructuralComparison(IProject project) {
+        return getOrCreateParser(project, false);
     }
 
     /**

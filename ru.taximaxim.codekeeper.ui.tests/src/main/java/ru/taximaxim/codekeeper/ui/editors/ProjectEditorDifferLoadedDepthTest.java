@@ -26,11 +26,12 @@ import org.pgcodekeeper.core.api.ComparisonDepth;
  * {@link ProjectEditorDiffer#getChanges()} decides {@code loadedDepth} - and
  * therefore what {@link ProjectEditorDiffer#diff()}'s guard sees as {@code
  * comparisonDepth} - along a three-way branch that no SWTBot test can reach
- * headless. Only the second half is worth pinning down here: a run the
- * reusable pipeline served is always {@link ComparisonDepth#FULL}, a bare
- * constant assigned at that one call site with nothing to decide. The other
- * half, extracted as {@link ProjectEditorDiffer#plainLoaderDepth}, is a real
- * decision between two loader paths and is pinned down below.
+ * headless. Both halves of it decide something, and both are extracted so
+ * they can be pinned down here without one. A run the reusable pipeline
+ * served is displayed at the depth the pipeline prepared, structural runs
+ * included, which is {@link ProjectEditorDiffer#reusablePipelineDepth}; a run
+ * the plain loader owns is displayed at the depth its loader path can
+ * actually deliver, which is {@link ProjectEditorDiffer#plainLoaderDepth}.
  * <p>
  * The guard that reads the answer is pinned down here too. {@link
  * ProjectEditorDiffer#scriptNeedsFullReload} is the whole of what keeps a
@@ -40,6 +41,17 @@ import org.pgcodekeeper.core.api.ComparisonDepth;
  * five other classes green.
  */
 class ProjectEditorDifferLoadedDepthTest {
+
+    @Test
+    void aServedRunIsDisplayedAtTheDepthThePipelinePrepared() {
+        assertEquals(ComparisonDepth.STRUCTURAL_ONLY,
+                ProjectEditorDiffer.reusablePipelineDepth(
+                        ComparisonDepth.STRUCTURAL_ONLY),
+                "the pipeline serves structural comparisons too, and the "
+                        + "guard downstream has to be told so");
+        assertEquals(ComparisonDepth.FULL,
+                ProjectEditorDiffer.reusablePipelineDepth(ComparisonDepth.FULL));
+    }
 
     @Test
     void theDepthAwareEntryPointHonorsWhateverWasRequested() {
@@ -77,6 +89,23 @@ class ProjectEditorDifferLoadedDepthTest {
                 ComparisonDepth.STRUCTURAL_ONLY),
                 "a model with no dependencies cannot order the statements of "
                         + "a script and must be recomputed first");
+    }
+
+    /**
+     * The two halves in series, because that is the order they run in: a
+     * structural comparison the pipeline served reaches the guard as
+     * structural, and the guard turns it away. Either half answering
+     * {@link ComparisonDepth#FULL} on its own would put a model with no
+     * dependencies in front of the script generator.
+     */
+    @Test
+    void aStructuralRunThePipelineServedStillCannotBuildAScript() {
+        assertTrue(ProjectEditorDiffer.scriptNeedsFullReload(
+                ProjectEditorDiffer.reusablePipelineDepth(
+                        ComparisonDepth.STRUCTURAL_ONLY)));
+        assertFalse(ProjectEditorDiffer.scriptNeedsFullReload(
+                ProjectEditorDiffer.reusablePipelineDepth(
+                        ComparisonDepth.FULL)));
     }
 
     /**

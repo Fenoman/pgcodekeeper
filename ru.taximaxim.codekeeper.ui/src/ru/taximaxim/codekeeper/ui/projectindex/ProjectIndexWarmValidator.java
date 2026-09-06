@@ -160,6 +160,17 @@ public final class ProjectIndexWarmValidator {
     }
 
     /**
+     * Validates every matching file by content, including edits that preserve
+     * both size and modification time. Uses the default divergence budget.
+     */
+    public static Result validateContent(List<ProjectFileStamp> expected,
+            List<CurrentFile> current, DigestReader digestReader,
+            BooleanSupplier cancelled) throws IOException, InterruptedException {
+        return validate(expected, current, digestReader, cancelled,
+                DEFAULT_MAX_DIVERGENCES, System.currentTimeMillis(), false);
+    }
+
+    /**
      * Compares an indexed set of file stamps against the working tree.
      *
      * <p>Both sides are expected to name each path once. A path enumerated
@@ -191,6 +202,14 @@ public final class ProjectIndexWarmValidator {
             List<CurrentFile> current, DigestReader digestReader,
             BooleanSupplier cancelled, int maxDivergences, long nowMillis)
             throws IOException, InterruptedException {
+        return validate(expected, current, digestReader, cancelled,
+                maxDivergences, nowMillis, true);
+    }
+
+    private static Result validate(List<ProjectFileStamp> expected,
+            List<CurrentFile> current, DigestReader digestReader,
+            BooleanSupplier cancelled, int maxDivergences, long nowMillis,
+            boolean trustMetadata) throws IOException, InterruptedException {
         Objects.requireNonNull(expected, "expected");
         Objects.requireNonNull(current, "current");
         Objects.requireNonNull(digestReader, "digestReader");
@@ -209,7 +228,7 @@ public final class ProjectIndexWarmValidator {
         Map<IndexPathRef, CurrentFile> unmatched = byPath.orElseThrow();
         var divergences = new Divergences(maxDivergences);
         compareIndexed(expected, unmatched, digestReader, cancelled, nowMillis,
-                divergences);
+                trustMetadata, divergences);
         collectAdded(current, unmatched, cancelled, divergences);
         return divergences.toResult();
     }
@@ -239,7 +258,7 @@ public final class ProjectIndexWarmValidator {
     private static void compareIndexed(List<ProjectFileStamp> expected,
             Map<IndexPathRef, CurrentFile> unmatched,
             DigestReader digestReader, BooleanSupplier cancelled,
-            long nowMillis, Divergences divergences)
+            long nowMillis, boolean trustMetadata, Divergences divergences)
             throws IOException, InterruptedException {
         for (ProjectFileStamp stamp : expected) {
             if (divergences.isTruncated()) {
@@ -251,7 +270,7 @@ public final class ProjectIndexWarmValidator {
                 divergences.recordRemoved(stamp.path());
             } else if (file.size() != stamp.size()) {
                 divergences.recordChanged(stamp.path());
-            } else if (!metadataMatches(stamp, file, nowMillis)) {
+            } else if (!trustMetadata || !metadataMatches(stamp, file, nowMillis)) {
                 compareContent(stamp, file, digestReader, cancelled,
                         divergences);
             }

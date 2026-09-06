@@ -31,7 +31,8 @@ import org.pgcodekeeper.core.settings.ProjectFileFilter;
 import ru.taximaxim.codekeeper.ui.DatabaseType;
 
 /**
- * Immutable semantic key for a reusable analyzed project model.
+ * Immutable semantic profile for a reusable project model. The in-memory
+ * cache also keys models by comparison depth; persisted models are FULL only.
  * <p>
  * Execution policy, telemetry, JDBC transport, catalog cache and parallel
  * reader settings are deliberately absent: they can change how a model is
@@ -46,10 +47,11 @@ import ru.taximaxim.codekeeper.ui.DatabaseType;
  * <ul>
  * <li>{@code isPgRoutineBodySkipMatchedAnalysis} does change what a routine
  * body contributes to an ordinary project load, but never to a captured one.
- * A loader running under {@code PgProjectLoader.enableReusableModelCapture}
+ * A FULL loader running under {@code PgProjectLoader.enableReusableModelCapture}
  * disarms the matched-body skip on every routine launcher between parsing and
- * analysis, so a model that reaches this cache is analyzed in full whatever
- * the flag said - see {@code PgProjectLoader.loadInternal}, held there by
+ * analysis, so a FULL model is analyzed completely whatever the flag said.
+ * Structural models perform no body analysis regardless of that flag.
+ * See {@code PgProjectLoader.loadInternal}, held there by
  * {@code PreanalyzedProjectLoaderTest
  * #captureKeepsProjectFullBodyAnalysisButDoesNotMutateSharedSetting}.
  * <li>{@code isPgRoutineBodyHashFirst} is what

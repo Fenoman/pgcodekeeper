@@ -22,6 +22,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 
@@ -38,8 +39,10 @@ import org.pgcodekeeper.core.database.api.IDatabaseProvider;
 import org.pgcodekeeper.core.database.api.loader.ComparisonLoaderFactories;
 import org.pgcodekeeper.core.database.api.loader.ILoaderFactory;
 import org.pgcodekeeper.core.database.api.loader.IProjectLoader;
+import org.pgcodekeeper.core.database.api.loader.ProjectInputFingerprint;
 import org.pgcodekeeper.core.database.base.loader.LoaderFactories;
 import org.pgcodekeeper.core.database.pg.loader.PreanalyzedProjectLoader;
+import org.pgcodekeeper.core.database.pg.loader.PreloadedStructuralProjectLoader;
 import org.pgcodekeeper.core.database.pg.routine.ReusableProjectRoutineBodySnapshot;
 import org.pgcodekeeper.core.database.pg.schema.PgDatabase;
 import org.pgcodekeeper.core.settings.ISettings;
@@ -67,7 +70,8 @@ import ru.taximaxim.codekeeper.ui.utils.GetChangesProgressSink.Profile;
 import ru.taximaxim.codekeeper.ui.utils.UIMonitor;
 
 /**
- * Owns the one-generation analyzed OLD model cache for an Eclipse diff editor.
+ * Owns the one-generation OLD model cache for an Eclipse diff editor.
+ * Model depth is part of its key; structural and analyzed models never mix.
  * NEW is always loaded from a fresh factory. Every uncertain state falls back
  * to a cold project load or rejects publication; it never publishes a cached
  * model on partial evidence.
@@ -109,12 +113,10 @@ public final class ReusableProjectComparison implements AutoCloseable {
      * settings and depth. Empty means the caller must use the ordinary cold
      * loader path.
      *
-     * @param depth how deep this comparison must load. Anything other than
-     *              {@link ComparisonDepth#FULL} bypasses this pipeline before
-     *              the cache is even consulted - see the class javadoc: the
-     *              cache exists to reuse a fully analyzed model, and serving
-     *              or storing anything else would need invalidation rules
-     *              this pipeline does not have.
+     * @param depth how deep this comparison must load. A retained model can
+     *              serve only that exact depth. Structural comparisons use
+     *              file fingerprints and mutation epochs without opening the
+     *              analyzed reference index or its persisted analysis store.
      */
     public Optional<PreparedComparison> load(
             IProject project,
@@ -145,17 +147,6 @@ public final class ReusableProjectComparison implements AutoCloseable {
         GetChangesProgressSink progress = progress(telemetry);
         var modelValidation = new ModelValidationRun(telemetry);
         try {
-            if (depth != ComparisonDepth.FULL) {
-                // A structural request has nothing to gain from this pipeline
-                // and everything to lose from it: the cache holds an analyzed
-                // model, warm reuse would silently hand one back, and a cold
-                // run here would analyze a model nobody asked to have
-                // analyzed. Either way the promised speed-up would vanish, so
-                // this is checked before touching the cache at all.
-                cacheMiss(telemetry,
-                        ProjectModelFailClosedReason.STRUCTURAL_ONLY);
-                return Optional.empty();
-            }
             if (hasOneTimePreferences) {
                 cacheMiss(telemetry,
                         ProjectModelFailClosedReason.ONE_TIME);
@@ -164,6 +155,7 @@ public final class ReusableProjectComparison implements AutoCloseable {
             if (!ProjectIndexSupportPolicy.supportsReusableComparisonModel(
                     databaseType)
                     || !settings.requiresComparisonLoaderFactories()
+                    || !settings.getAdditionalExcludedSchemas().isEmpty()
                     || settings.getProjectFileFilter()
                             != ProjectFileFilter.ALLOW_ALL) {
                 cacheMiss(telemetry,
@@ -176,11 +168,12 @@ public final class ReusableProjectComparison implements AutoCloseable {
                 return Optional.empty();
             }
             progress.enterPhase(Phase.PROJECT_INDEX);
-            // The parser restores or rebuilds the persistent project index and
-            // reports its own work, so it gets a bounded child of this phase
-            // instead of the job monitor the staged plan owns.
-            PgDbParser parser = PgDbParser.getParserForComparison(project,
-                    slice(progress, Phase.PROJECT_INDEX, 70, monitor));
+            // FULL needs the reference index. Structural comparisons only
+            // register the parser's independent project mutation tracking.
+            PgDbParser parser = depth == ComparisonDepth.FULL
+                    ? PgDbParser.getParserForComparison(project,
+                            slice(progress, Phase.PROJECT_INDEX, 70, monitor))
+                    : PgDbParser.getParserForStructuralComparison(project);
             String configurationDigest =
                     ProjectConfigurationDigest.of(root);
 
@@ -195,8 +188,9 @@ public final class ReusableProjectComparison implements AutoCloseable {
             Optional<ProjectComparisonModelCache<ReusableModel>.Lease>
                     reusable = cache.acquireMatching(
                             key -> key
-                                    instanceof ProjectComparisonProfile profile
-                                    && profile.matchesSemantics(
+                                    instanceof ModelKey modelKey
+                                    && modelKey.depth() == depth
+                                    && modelKey.profile().matchesSemantics(
                                             databaseType, lookupSettings,
                                             configurationDigest));
             boolean retainedModelRejected = false;
@@ -206,7 +200,7 @@ public final class ReusableProjectComparison implements AutoCloseable {
                         project, databaseType,
                         provider, root, newFactory, settings,
                         oldName, newName, monitor, telemetry, progress,
-                        modelValidation, configurationDigest);
+                        modelValidation, configurationDigest, depth);
                 if (warm.isPresent()) {
                     return warm;
                 }
@@ -233,15 +227,17 @@ public final class ReusableProjectComparison implements AutoCloseable {
             // would be rejected for the same reason and reading it would only
             // buy a second full load. That run goes cold and refreshes the
             // store for the next one.
-            DiskAttempt disk = openDiskStore(project, root, databaseType,
-                    provider, lookupSettings, settings, configurationDigest,
-                    monitor, telemetry, !retainedModelRejected);
+            DiskAttempt disk = depth == ComparisonDepth.FULL
+                    ? openDiskStore(project, root, databaseType,
+                            provider, lookupSettings, settings, configurationDigest,
+                            monitor, telemetry, !retainedModelRejected)
+                    : DiskAttempt.unavailable();
             if (disk.hasPayload()) {
                 Optional<PreparedComparison> warmDisk = loadProject(
                         parser, projectFactory, project, databaseType, provider,
                         root, newFactory, settings, oldName, newName, monitor,
                         telemetry, progress, modelValidation,
-                        configurationDigest, disk);
+                        configurationDigest, disk, depth);
                 if (warmDisk.isPresent()) {
                     return warmDisk;
                 }
@@ -253,7 +249,7 @@ public final class ReusableProjectComparison implements AutoCloseable {
             return Optional.of(loadProject(parser, projectFactory, project,
                     databaseType, provider, root, newFactory, settings,
                     oldName, newName, monitor, telemetry, progress,
-                    modelValidation, configurationDigest, disk.withoutPayload())
+                    modelValidation, configurationDigest, disk.withoutPayload(), depth)
                     .orElseThrow());
         } finally {
             modelValidation.finish();
@@ -370,7 +366,7 @@ public final class ReusableProjectComparison implements AutoCloseable {
             EclipseComparisonTelemetry telemetry,
             GetChangesProgressSink progress,
             ModelValidationRun modelValidation,
-            String configurationDigest)
+            String configurationDigest, ComparisonDepth depth)
             throws IOException, InterruptedException {
         long cacheStart = startTimer(telemetry);
         PgDbParser.ValidatedProjectSnapshotLease snapshotLease = null;
@@ -382,61 +378,99 @@ public final class ReusableProjectComparison implements AutoCloseable {
             progress.profile(Profile.WARM);
             ReusableModel model = modelLease.model();
             mutationLease = parser.acquireProjectMutationLease();
-            Optional<PgDbParser.ValidatedProjectSnapshotLease> snapshot =
-                    parser
-                            .acquireValidatedProjectSnapshotLease(project,
-                                    slice(progress, Phase.PROJECT_INDEX, 100,
-                                            monitor));
+            if (depth == ComparisonDepth.STRUCTURAL_ONLY
+                    && !model.mutationToken().equals(mutationLease.token())) {
+                rejectWarm(modelLease, telemetry,
+                        ProjectModelFailClosedReason.STALE, 0, 0, cacheStart);
+                return Optional.empty();
+            }
+            if (depth == ComparisonDepth.FULL) {
+                Optional<PgDbParser.ValidatedProjectSnapshotLease> snapshot =
+                        parser.acquireValidatedProjectSnapshotLease(project,
+                                slice(progress, Phase.PROJECT_INDEX, 100, monitor));
+                if (snapshot.isEmpty()) {
+                    rejectWarm(modelLease, telemetry,
+                            ProjectModelFailClosedReason.STALE, 0, 0, cacheStart);
+                    return Optional.empty();
+                }
+                snapshotLease = snapshot.orElseThrow();
+                if (!model.snapshotToken().equals(snapshotLease.token())) {
+                    rejectWarm(modelLease, telemetry,
+                            ProjectModelFailClosedReason.STALE, 0, 0, cacheStart);
+                    return Optional.empty();
+                }
+            }
             progress.completePhase(Phase.PROJECT_INDEX);
-            if (snapshot.isEmpty()) {
-                rejectWarm(modelLease, telemetry,
-                        ProjectModelFailClosedReason.STALE,
-                        0, 0, cacheStart);
-                return Optional.empty();
-            }
-            snapshotLease = snapshot.orElseThrow();
-            if (!model.snapshotToken().equals(
-                    snapshotLease.token())) {
-                rejectWarm(modelLease, telemetry,
-                        ProjectModelFailClosedReason.STALE,
-                        0, 0, cacheStart);
-                return Optional.empty();
-            }
 
             progress.enterPhase(Phase.MODEL_VALIDATE);
-            ProjectComparisonInputSet current = inspectInputs(
-                    project, projectRoot, provider, settings, monitor);
-            BooleanSupplier cancelled =
-                    () -> monitor != null && monitor.isCanceled();
-            Result validation = model.inputs().validate(
-                    current.files(), current.resolver(), cancelled);
-            ProjectComparisonInputSet after = inspectInputs(
-                    project, projectRoot, provider, settings, monitor);
-            progress.completePhase(Phase.MODEL_VALIDATE);
-            if (!validation.hit()
-                    || !current.files().equals(after.files())
-                    || !mutationLease.isCurrent()
-                    || !snapshotLease.isCurrent()) {
-                rejectWarm(modelLease, telemetry,
-                        ProjectModelFailClosedReason.INPUT_CHANGED,
-                        current.files().size(),
-                        validation.hashedFiles(), cacheStart);
-                return Optional.empty();
+            var inputValidation = new AtomicReference<WarmInputValidation>();
+            if (depth == ComparisonDepth.FULL) {
+                WarmInputValidation checked = validateWarmInputs(model, project,
+                        projectRoot, provider, settings, monitor, depth);
+                inputValidation.set(checked);
+                progress.completePhase(Phase.MODEL_VALIDATE);
+                if (!checked.hit() || !mutationLease.isCurrent() || !snapshotLease.isCurrent()) {
+                    rejectWarm(modelLease, telemetry,
+                            ProjectModelFailClosedReason.INPUT_CHANGED,
+                            checked.current().files().size(),
+                            checked.result().hashedFiles(), cacheStart);
+                    return Optional.empty();
+                }
             }
 
             ILoaderFactory oldFactory = LoaderFactories.project(
                     projectRoot, sideSettings ->
-                            new PreanalyzedProjectLoader(
+                            depth == ComparisonDepth.FULL
+                            ? new PreanalyzedProjectLoader(
                                     model.database(),
                                     model.routineSnapshot(),
-                                    sideSettings, oldName));
+                                    sideSettings, oldName)
+                            : new PreloadedStructuralProjectLoader(
+                                    model.database(), model.routineSnapshot(),
+                                    sideSettings, oldName) {
+                                @Override
+                                public PgDatabase load() throws IOException, InterruptedException {
+                                    PgDatabase database = super.load();
+                                    // Reuse the coordinator's OLD task so file validation
+                                    // overlaps NEW without an additional executor.
+                                    inputValidation.set(validateWarmInputs(model, project,
+                                            projectRoot, provider, settings, monitor, depth));
+                                    return database;
+                                }
+                            });
             progress.enterPhase(Phase.CORE_LOAD);
             UIComparisonLoader.LoadedModels loaded =
                     UIComparisonLoader.loadModels(
                             new ComparisonLoaderFactories(
                                     oldFactory, newFactory),
-                            settings);
+                            settings, depth);
             progress.completePhase(Phase.CORE_LOAD);
+            WarmInputValidation checked = Objects.requireNonNull(inputValidation.get());
+            ProjectComparisonInputSet current = checked.current();
+            Result validation = checked.result();
+            if (!checked.hit() || !mutationLease.isCurrent()
+                    || snapshotLease != null && !snapshotLease.isCurrent()) {
+                progress.completePhase(Phase.MODEL_VALIDATE);
+                rejectWarm(modelLease, telemetry,
+                        ProjectModelFailClosedReason.INPUT_CHANGED,
+                        current.files().size(), validation.hashedFiles(), cacheStart);
+                return Optional.empty();
+            }
+            // Hashing ran while the database was still loading, so the file set
+            // it saw is only a claim about that moment. Settle it here, where
+            // both sides have finished, exactly as a cold run does.
+            ProjectComparisonInputSet after = inspectInputs(
+                    project, projectRoot, provider, settings, monitor);
+            progress.completePhase(Phase.MODEL_VALIDATE);
+            if (!current.files().equals(after.files())) {
+                rejectWarm(modelLease, telemetry,
+                        ProjectModelFailClosedReason.INPUT_CHANGED,
+                        current.files().size(), validation.hashedFiles(), cacheStart);
+                throw inputsChanged(telemetry,
+                        ProjectInputChangeStage.FILE_SET,
+                        firstChangedPath(current.files(), after.files()));
+            }
+
             Optional<ProjectComparisonProfile> finalProfile =
                     ProjectComparisonProfile.capture(
                             databaseType, loaded.settings(),
@@ -452,7 +486,7 @@ public final class ReusableProjectComparison implements AutoCloseable {
                 snapshotLease = null;
                 return Optional.empty();
             }
-            if (!snapshotLease.isCurrent()) {
+            if (snapshotLease != null && !snapshotLease.isCurrent()) {
                 rejectWarm(modelLease, telemetry,
                         ProjectModelFailClosedReason.STALE,
                         current.files().size(),
@@ -463,7 +497,7 @@ public final class ReusableProjectComparison implements AutoCloseable {
             UIComparisonLoader.Result result = createResult(
                     loaded, oldName, newName, telemetry, progress);
             if (!mutationLease.isCurrent()
-                    || !snapshotLease.isCurrent()) {
+                    || snapshotLease != null && !snapshotLease.isCurrent()) {
                 rejectWarm(modelLease, telemetry,
                         ProjectModelFailClosedReason.STALE,
                         current.files().size(),
@@ -477,7 +511,7 @@ public final class ReusableProjectComparison implements AutoCloseable {
             modelValidation.finish();
 
             var prepared = new PreparedComparison(
-                    result, true, modelLease, null,
+                    result, loaded.depth(), true, modelLease, null,
                     snapshotLease, mutationLease, telemetry);
             snapshotLease = null;
             mutationLease = null;
@@ -489,6 +523,32 @@ public final class ReusableProjectComparison implements AutoCloseable {
                 closeMutation(mutationLease);
                 modelLease.close();
             }
+        }
+    }
+
+    private static WarmInputValidation validateWarmInputs(ReusableModel model,
+            IProject project, Path projectRoot, IDatabaseProvider provider,
+            ISettings settings, IProgressMonitor monitor, ComparisonDepth depth)
+            throws IOException, InterruptedException {
+        ProjectComparisonInputSet current = inspectInputs(
+                project, projectRoot, provider, settings, monitor);
+        BooleanSupplier cancelled = () -> Thread.currentThread().isInterrupted()
+                || monitor != null && monitor.isCanceled();
+        Result validation = depth == ComparisonDepth.STRUCTURAL_ONLY
+                ? model.inputs().validateContent(current.files(), current.resolver(), cancelled)
+                : model.inputs().validate(current.files(), current.resolver(), cancelled);
+        return new WarmInputValidation(current, validation);
+    }
+
+    /**
+     * Content validation of one warm pass against the enumeration it ran on.
+     * A changed file set is not decided here: it is the caller that compares
+     * this enumeration with a final one taken after both sides have finished.
+     */
+    private record WarmInputValidation(ProjectComparisonInputSet current,
+            Result result) {
+        boolean hit() {
+            return result.hit();
         }
     }
 
@@ -523,10 +583,11 @@ public final class ReusableProjectComparison implements AutoCloseable {
             GetChangesProgressSink progress,
             ModelValidationRun modelValidation,
             String configurationDigest,
-            DiskAttempt disk)
+            DiskAttempt disk, ComparisonDepth depth)
             throws IOException, InterruptedException {
-        // A cold run parses the whole project inside the load and hashes every
-        // input file afterwards, which is the opposite order of a warm run.
+        // A cold run hashes consumed files after parsing. Structural loads do
+        // that on the OLD worker while NEW can still be loading; the final
+        // file-set and mutation checks remain after both workers finish.
         progress.profile(Profile.COLD);
         progress.completePhase(Phase.PROJECT_INDEX);
         PgDbParser.ProjectMutationLease mutationLease =
@@ -536,15 +597,21 @@ public final class ReusableProjectComparison implements AutoCloseable {
         boolean transferred = false;
         long cacheStart = startTimer(telemetry);
         try {
+            var validatedInputs = new AtomicReference<ColdInputValidation>();
             var capturing = new CapturingPgProjectLoaderFactory(
-                    projectFactory, disk.payload());
+                    projectFactory, disk.payload(), depth,
+                    depth == ComparisonDepth.STRUCTURAL_ONLY
+                            ? (fingerprints, sideSettings) -> validatedInputs.set(
+                                    validateColdInputs(project, projectRoot, provider,
+                                            sideSettings, monitor, fingerprints))
+                            : null);
             progress.analysisReplayProbe(capturing::isAnalysisReplayed);
             progress.enterPhase(Phase.CORE_LOAD);
             UIComparisonLoader.LoadedModels loaded =
                     UIComparisonLoader.loadModels(
                             new ComparisonLoaderFactories(
                                     capturing, newFactory),
-                            settings);
+                            settings, depth);
             progress.completePhase(Phase.CORE_LOAD);
             if (!(loaded.oldDatabase()
                     instanceof PgDatabase oldDatabase)) {
@@ -560,17 +627,12 @@ public final class ReusableProjectComparison implements AutoCloseable {
                             () -> new IllegalStateException(
                                     "Project loader did not capture consumed inputs")); //$NON-NLS-1$
             progress.enterPhase(Phase.MODEL_VALIDATE);
-            ProjectComparisonInputSet current = inspectInputs(
-                    project, projectRoot, provider,
-                    loaded.settings(), monitor);
-            BooleanSupplier cancelled =
-                    () -> monitor != null
-                            && monitor.isCanceled();
-            Optional<ProjectComparisonInputSnapshot> inputs =
-                    ProjectComparisonInputSnapshot.capture(
-                            current.files(),
-                            capture.inputFingerprints(),
-                            current.resolver(), cancelled);
+            ColdInputValidation validation = depth == ComparisonDepth.STRUCTURAL_ONLY
+                    ? Objects.requireNonNull(validatedInputs.get(), "input validation") //$NON-NLS-1$
+                    : validateColdInputs(project, projectRoot, provider,
+                            loaded.settings(), monitor, capture.inputFingerprints());
+            ProjectComparisonInputSet current = validation.current();
+            Optional<ProjectComparisonInputSnapshot> inputs = validation.inputs();
             ProjectComparisonInputSet after = inspectInputs(
                     project, projectRoot, provider,
                     loaded.settings(), monitor);
@@ -592,34 +654,34 @@ public final class ReusableProjectComparison implements AutoCloseable {
                         null, current.files().size(), cacheStart);
             }
 
-            if (profile.isPresent()) {
-                Optional<PgDbParser.ValidatedProjectSnapshotLease> snapshot =
-                        parser
-                                .acquireValidatedProjectSnapshotLease(project,
-                                        slice(progress, Phase.MODEL_VALIDATE,
-                                                40, monitor));
-                if (snapshot.isPresent()) {
-                    snapshotLease = snapshot.orElseThrow();
-                    if (!mutationLease.isCurrent()) {
-                        throw rejectColdInputChange(telemetry,
-                                ProjectInputChangeStage.MUTATION_EPOCH,
-                                null, current.files().size(),
-                                cacheStart);
+            if (profile.isPresent() && loaded.settings().getErrors().isEmpty()) {
+                if (depth == ComparisonDepth.FULL) {
+                    Optional<PgDbParser.ValidatedProjectSnapshotLease> snapshot =
+                            parser.acquireValidatedProjectSnapshotLease(project,
+                                    slice(progress, Phase.MODEL_VALIDATE, 40, monitor));
+                    if (snapshot.isPresent()) {
+                        snapshotLease = snapshot.orElseThrow();
+                        if (!mutationLease.isCurrent()) {
+                            throw rejectColdInputChange(telemetry,
+                                    ProjectInputChangeStage.MUTATION_EPOCH,
+                                    null, current.files().size(), cacheStart);
+                        }
+                        if (!snapshotLease.isCurrent()) {
+                            throw rejectColdInputChange(telemetry,
+                                    ProjectInputChangeStage.INDEX_SNAPSHOT,
+                                    null, current.files().size(), cacheStart);
+                        }
                     }
-                    if (!snapshotLease.isCurrent()) {
-                        throw rejectColdInputChange(telemetry,
-                                ProjectInputChangeStage.INDEX_SNAPSHOT,
-                                null, current.files().size(),
-                                cacheStart);
-                    }
+                }
+                if (depth == ComparisonDepth.STRUCTURAL_ONLY || snapshotLease != null) {
                     var reusableModel = new ReusableModel(
                             oldDatabase,
                             capture.routineSnapshot(),
                             inputs.orElseThrow(),
-                            profile.orElseThrow(),
-                            snapshotLease.token());
+                            profile.orElseThrow(), depth, mutationLease.token(),
+                            snapshotLease == null ? null : snapshotLease.token());
                     candidate = cache.prepare(
-                            profile.orElseThrow(), reusableModel);
+                            new ModelKey(profile.orElseThrow(), depth), reusableModel);
                 }
             }
             boolean replayed = capturing.isAnalysisReplayed();
@@ -659,7 +721,7 @@ public final class ReusableProjectComparison implements AutoCloseable {
                         cacheStart);
             }
             var prepared = new PreparedComparison(
-                    result, false, replayed, null, candidate,
+                    result, loaded.depth(), false, replayed, null, candidate,
                     snapshotLease, mutationLease, telemetry,
                     persistence(disk, replayed, finalDigest, profile,
                             inputs.orElseThrow(), oldDatabase, telemetry));
@@ -675,6 +737,22 @@ public final class ReusableProjectComparison implements AutoCloseable {
                 closeMutation(mutationLease);
             }
         }
+    }
+
+    private record ColdInputValidation(ProjectComparisonInputSet current,
+            Optional<ProjectComparisonInputSnapshot> inputs) {
+    }
+
+    private static ColdInputValidation validateColdInputs(IProject project,
+            Path projectRoot, IDatabaseProvider provider, ISettings settings,
+            IProgressMonitor monitor, List<ProjectInputFingerprint> fingerprints)
+            throws IOException, InterruptedException {
+        ProjectComparisonInputSet current = inspectInputs(
+                project, projectRoot, provider, settings, monitor);
+        Optional<ProjectComparisonInputSnapshot> inputs =
+                ProjectComparisonInputSnapshot.capture(current.files(), fingerprints,
+                        current.resolver(), () -> monitor != null && monitor.isCanceled());
+        return new ColdInputValidation(current, inputs);
     }
 
     /**
@@ -912,6 +990,17 @@ public final class ReusableProjectComparison implements AutoCloseable {
         cacheEvent(telemetry, ProjectModelCacheStatus.REJECTED,
                 ProjectModelFailClosedReason.INPUT_CHANGED,
                 filesInspected, filesInspected, cacheStart);
+        return inputsChanged(telemetry, stage, relativePath);
+    }
+
+    /**
+     * Reports the typed cancellation both paths answer an input change with.
+     * The cache event is left to the caller, because a warm run counts hashed
+     * files differently from a cold one.
+     */
+    private static ProjectInputsChangedException inputsChanged(
+            EclipseComparisonTelemetry telemetry,
+            ProjectInputChangeStage stage, String relativePath) {
         if (telemetry != null) {
             telemetry.projectInputsChanged(stage);
         }
@@ -997,11 +1086,15 @@ public final class ReusableProjectComparison implements AutoCloseable {
         }
     }
 
+    private record ModelKey(ProjectComparisonProfile profile, ComparisonDepth depth) { }
+
     private record ReusableModel(
             PgDatabase database,
             ReusableProjectRoutineBodySnapshot routineSnapshot,
             ProjectComparisonInputSnapshot inputs,
             ProjectComparisonProfile profile,
+            ComparisonDepth depth,
+            PgDbParser.ProjectMutationToken mutationToken,
             PgDbParser.ProjectSnapshotToken snapshotToken)
             implements AutoCloseable {
 
@@ -1011,8 +1104,11 @@ public final class ReusableProjectComparison implements AutoCloseable {
                     "routineSnapshot"); //$NON-NLS-1$
             Objects.requireNonNull(inputs, "inputs"); //$NON-NLS-1$
             Objects.requireNonNull(profile, "profile"); //$NON-NLS-1$
-            Objects.requireNonNull(snapshotToken,
-                    "snapshotToken"); //$NON-NLS-1$
+            Objects.requireNonNull(depth, "depth"); //$NON-NLS-1$
+            Objects.requireNonNull(mutationToken, "mutationToken"); //$NON-NLS-1$
+            if (depth == ComparisonDepth.FULL) {
+                Objects.requireNonNull(snapshotToken, "snapshotToken"); //$NON-NLS-1$
+            }
         }
 
         @Override
@@ -1028,6 +1124,7 @@ public final class ReusableProjectComparison implements AutoCloseable {
     public final class PreparedComparison implements AutoCloseable {
 
         private final UIComparisonLoader.Result result;
+        private final ComparisonDepth depth;
         private final boolean reused;
         private final boolean analysisReplayed;
         private ProjectComparisonModelCache<ReusableModel>.Lease modelLease;
@@ -1040,18 +1137,20 @@ public final class ReusableProjectComparison implements AutoCloseable {
 
         private PreparedComparison(
                 UIComparisonLoader.Result result,
+                ComparisonDepth depth,
                 boolean reused,
                 ProjectComparisonModelCache<ReusableModel>.Lease modelLease,
                 ProjectComparisonModelCache<ReusableModel>.Candidate candidate,
                 PgDbParser.ValidatedProjectSnapshotLease snapshotLease,
                 PgDbParser.ProjectMutationLease mutationLease,
                 EclipseComparisonTelemetry telemetry) {
-            this(result, reused, false, modelLease, candidate, snapshotLease,
+            this(result, depth, reused, false, modelLease, candidate, snapshotLease,
                     mutationLease, telemetry, null);
         }
 
         private PreparedComparison(
                 UIComparisonLoader.Result result,
+                ComparisonDepth depth,
                 boolean reused,
                 boolean analysisReplayed,
                 ProjectComparisonModelCache<ReusableModel>.Lease modelLease,
@@ -1062,6 +1161,7 @@ public final class ReusableProjectComparison implements AutoCloseable {
                 Runnable persistence) {
             this.result = Objects.requireNonNull(
                     result, "result"); //$NON-NLS-1$
+            this.depth = Objects.requireNonNull(depth, "depth"); //$NON-NLS-1$
             this.reused = reused;
             this.analysisReplayed = analysisReplayed;
             this.modelLease = modelLease;
@@ -1097,8 +1197,12 @@ public final class ReusableProjectComparison implements AutoCloseable {
             return result;
         }
 
+        public ComparisonDepth depth() {
+            return depth;
+        }
+
         /**
-         * Reports that the retained analyzed model was reused, so the project
+         * Reports that the retained model was reused, so the project
          * side was not loaded at all.
          *
          * @return true if this comparison reused the in-memory model

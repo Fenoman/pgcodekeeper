@@ -772,12 +772,7 @@ public final class ProjectEditorDiffer extends EditorPart
                         if (reusable.isPresent()) {
                             prepared = reusable.orElseThrow();
                             loaded = prepared.result();
-                            // The reusable pipeline now declines outright
-                            // unless this request asked for FULL (its sixth
-                            // early exit), and on every path it does take it
-                            // still calls Core without a depth of its own, so
-                            // a run it served is always FULL.
-                            loadedDepth = ComparisonDepth.FULL;
+                            loadedDepth = reusablePipelineDepth(prepared.depth());
                         } else {
                             // The reusable pipeline declined this run, so the
                             // plain loader owns the load and tree phases.
@@ -988,15 +983,34 @@ public final class ProjectEditorDiffer extends EditorPart
 
     /**
      * Decides the depth {@code loadedDepth} ends up at once the reusable
+     * pipeline has served a run - the first half of the three-way branch in
+     * {@link #getChanges()} that {@code comparisonDepth}, and therefore
+     * {@link #diff()}'s guard, ultimately answers to. The pipeline hands back
+     * whatever depth it prepared the served comparison at, structural runs
+     * included. Extracted so it can be pinned down by a test without a
+     * workbench, unlike the branch itself.
+     *
+     * @param preparedDepth the depth the pipeline prepared the served
+     *                      comparison at
+     * @return the depth the served comparison leaves the models at
+     */
+    static ComparisonDepth reusablePipelineDepth(ComparisonDepth preparedDepth) {
+        // Answering FULL regardless of what was served would let diff() build
+        // a migration script out of a structurally loaded model, whose
+        // statements carry no dependencies to order them by.
+        return preparedDepth;
+    }
+
+    /**
+     * Decides the depth {@code loadedDepth} ends up at once the reusable
      * pipeline has declined a run and the plain loader owns it - the second
      * half of the three-way branch in {@link #getChanges()} that {@code
      * comparisonDepth}, and therefore {@link #diff()}'s guard, ultimately
      * answers to. Extracted so it can be pinned down by a test without a
      * workbench, unlike the branch itself.
      * <p>
-     * The first half needs no such test: a run the reusable pipeline served
-     * is always {@link ComparisonDepth#FULL}, a bare constant - see the
-     * comment at that call site.
+     * The first half, a run the reusable pipeline served, is
+     * {@link #reusablePipelineDepth}.
      *
      * @param requiresLoaderFactories whether this run's settings use the
      *                                depth-aware coordinator entry point

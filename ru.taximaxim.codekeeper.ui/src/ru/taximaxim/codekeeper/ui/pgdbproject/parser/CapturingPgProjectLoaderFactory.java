@@ -22,11 +22,13 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.pgcodekeeper.core.analysis.AnalysisReplayPayload;
+import org.pgcodekeeper.core.api.ComparisonDepth;
 import org.pgcodekeeper.core.database.api.loader.ILoader;
 import org.pgcodekeeper.core.database.api.loader.ILoaderFactory;
 import org.pgcodekeeper.core.database.api.loader.IProjectInputFingerprintCapture;
 import org.pgcodekeeper.core.database.api.loader.ProjectInputFingerprint;
 import org.pgcodekeeper.core.database.pg.loader.PgProjectLoader;
+import org.pgcodekeeper.core.database.pg.loader.PgProjectLoader.InputFingerprintValidator;
 import org.pgcodekeeper.core.database.pg.routine.ReusableProjectRoutineBodySnapshot;
 import org.pgcodekeeper.core.database.pg.schema.PgDatabase;
 import org.pgcodekeeper.core.settings.ISettings;
@@ -50,6 +52,8 @@ final class CapturingPgProjectLoaderFactory implements ILoaderFactory {
 
     private final ILoaderFactory delegate;
     private final AnalysisReplayPayload replayPayload;
+    private final ComparisonDepth depth;
+    private final InputFingerprintValidator inputValidator;
     private final AtomicReference<PgProjectLoader> created =
             new AtomicReference<>();
     private volatile boolean analysisReplayed;
@@ -64,9 +68,25 @@ final class CapturingPgProjectLoaderFactory implements ILoaderFactory {
      */
     CapturingPgProjectLoaderFactory(ILoaderFactory delegate,
             AnalysisReplayPayload replayPayload) {
+        this(delegate, replayPayload, ComparisonDepth.FULL);
+    }
+
+    CapturingPgProjectLoaderFactory(ILoaderFactory delegate,
+            AnalysisReplayPayload replayPayload, ComparisonDepth depth) {
+        this(delegate, replayPayload, depth, null);
+    }
+
+    CapturingPgProjectLoaderFactory(ILoaderFactory delegate,
+            AnalysisReplayPayload replayPayload, ComparisonDepth depth,
+            InputFingerprintValidator inputValidator) {
         this.delegate = Objects.requireNonNull(
                 delegate, "delegate"); //$NON-NLS-1$
         this.replayPayload = replayPayload;
+        this.depth = Objects.requireNonNull(depth, "depth"); //$NON-NLS-1$
+        this.inputValidator = inputValidator;
+        if (depth != ComparisonDepth.FULL && replayPayload != null) {
+            throw new IllegalArgumentException("Structural comparisons cannot replay analysis"); //$NON-NLS-1$
+        }
     }
 
     @Override
@@ -84,12 +104,15 @@ final class CapturingPgProjectLoaderFactory implements ILoaderFactory {
                 throw new IllegalArgumentException(
                         "Reusable model capture requires PgProjectLoader"); //$NON-NLS-1$
             }
-            projectLoader.enableReusableModelCapture();
+            projectLoader.enableReusableModelCapture(depth);
             if (replayPayload != null) {
                 projectLoader.enableAnalysisReplay(replayPayload);
             }
             ((IProjectInputFingerprintCapture) projectLoader)
                     .enableInputFingerprintCapture();
+            if (inputValidator != null) {
+                projectLoader.setInputFingerprintValidator(inputValidator);
+            }
             if (!created.compareAndSet(null, projectLoader)) {
                 throw new IllegalStateException(
                         "Project loader factory may be used only once"); //$NON-NLS-1$

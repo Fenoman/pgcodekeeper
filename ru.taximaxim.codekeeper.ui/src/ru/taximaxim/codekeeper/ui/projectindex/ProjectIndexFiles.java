@@ -15,7 +15,6 @@
  *******************************************************************************/
 package ru.taximaxim.codekeeper.ui.projectindex;
 
-import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -37,6 +36,7 @@ import java.util.function.ToLongFunction;
 import org.pgcodekeeper.core.database.api.loader.ProjectInputFingerprint;
 
 import ru.taximaxim.codekeeper.ui.projectindex.ProjectIndexWarmValidator.CurrentFile;
+import ru.taximaxim.codekeeper.ui.projectindex.ProjectIndexWarmValidator.DigestReader;
 
 public final class ProjectIndexFiles {
 
@@ -80,11 +80,12 @@ public final class ProjectIndexFiles {
         Objects.requireNonNull(resolver, "resolver");
         Objects.requireNonNull(cancelled, "cancelled");
         List<ProjectFileStamp> result = new ArrayList<>(files.size());
+        DigestReader reader = digestReader(resolver, cancelled);
         for (CurrentFile file : files) {
             checkCancelled(cancelled);
             result.add(new ProjectFileStamp(file.path(),
                     file.eclipseModificationStamp(), file.size(),
-                    file.lastModifiedMillis(), sha256(file, resolver, cancelled)));
+                    file.lastModifiedMillis(), reader.sha256(file)));
         }
         return List.copyOf(result);
     }
@@ -141,6 +142,16 @@ public final class ProjectIndexFiles {
             ProjectIndexPathResolver resolver, BooleanSupplier cancelled)
             throws IOException, InterruptedException {
         Objects.requireNonNull(file, "file");
+        return digestReader(resolver, cancelled).sha256(file);
+    }
+
+    /**
+     * Creates a reader for one sequential validation pass. The reader reuses
+     * its digest and read buffer across files; concurrent passes must each
+     * create their own reader.
+     */
+    public static DigestReader digestReader(ProjectIndexPathResolver resolver,
+            BooleanSupplier cancelled) {
         Objects.requireNonNull(resolver, "resolver");
         Objects.requireNonNull(cancelled, "cancelled");
         MessageDigest digest;
@@ -149,20 +160,25 @@ public final class ProjectIndexFiles {
         } catch (NoSuchAlgorithmException ex) {
             throw new IllegalStateException("SHA-256 is unavailable", ex);
         }
-        Path path = Path.of(resolver.resolve(file.path()));
         byte[] buffer = new byte[HASH_BUFFER_BYTES];
-        try (InputStream input = new BufferedInputStream(
-                Files.newInputStream(path), HASH_BUFFER_BYTES)) {
-            int read;
-            while ((read = input.read(buffer)) >= 0) {
-                checkCancelled(cancelled);
-                if (read != 0) {
-                    digest.update(buffer, 0, read);
+        return file -> {
+            Objects.requireNonNull(file, "file");
+            // A preceding file may have failed or been cancelled mid-read.
+            digest.reset();
+            checkCancelled(cancelled);
+            Path path = Path.of(resolver.resolve(file.path()));
+            try (InputStream input = Files.newInputStream(path)) {
+                int read;
+                while ((read = input.read(buffer)) >= 0) {
+                    checkCancelled(cancelled);
+                    if (read != 0) {
+                        digest.update(buffer, 0, read);
+                    }
                 }
             }
-        }
-        checkCancelled(cancelled);
-        return digest.digest();
+            checkCancelled(cancelled);
+            return digest.digest();
+        };
     }
 
     private static IndexPathRef toIndexPath(Path input, Path project,
