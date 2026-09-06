@@ -86,12 +86,14 @@ class MigrationScriptParityTest {
 
             try (var reusable = new ReusableProjectComparison()) {
                 PipelineRun cold = fixture.pipelineScript(reusable);
+                assertNoComparisonReferences(cold);
                 assertFalse(cold.reused(),
                         "the first comparison of a session has nothing to reuse"); //$NON-NLS-1$
                 assertEquals(fullParse, cold.script(),
                         "a cold pipeline run must build the script a full parse builds"); //$NON-NLS-1$
 
                 PipelineRun warm = fixture.pipelineScript(reusable);
+                assertNoComparisonReferences(warm);
                 assertTrue(warm.reused(),
                         "the second comparison must reuse the retained model, or this " //$NON-NLS-1$
                                 + "test compares two cold runs and asserts nothing about reuse"); //$NON-NLS-1$
@@ -123,6 +125,7 @@ class MigrationScriptParityTest {
                 String beforeEdit = fixture.oracleScript();
                 assertScriptIsNotVacuous(beforeEdit);
                 PipelineRun cold = fixture.pipelineScript(reusable);
+                assertNoComparisonReferences(cold);
                 assertFalse(cold.reused());
                 assertEquals(beforeEdit, cold.script());
 
@@ -147,6 +150,7 @@ class MigrationScriptParityTest {
                                 + "stale answer from a current one"); //$NON-NLS-1$
 
                 PipelineRun afterwards = fixture.pipelineScript(reusable);
+                assertNoComparisonReferences(afterwards);
                 assertTrue(afterwards.script().contains("note"), //$NON-NLS-1$
                         () -> "the script must carry the edited column; without it the " //$NON-NLS-1$
                                 + "pipeline answered for the project it was holding, not " //$NON-NLS-1$
@@ -181,6 +185,7 @@ class MigrationScriptParityTest {
 
             try (var seeding = new ReusableProjectComparison()) {
                 PipelineRun cold = fixture.pipelineScript(seeding);
+                assertNoComparisonReferences(cold);
                 assertFalse(cold.reused());
                 assertFalse(cold.analysisReplayed(),
                         "there is nothing on disk to replay for a first-ever run"); //$NON-NLS-1$
@@ -189,6 +194,7 @@ class MigrationScriptParityTest {
 
             try (var restarted = new ReusableProjectComparison()) {
                 PipelineRun replayed = fixture.pipelineScript(restarted);
+                assertNoComparisonReferences(replayed);
                 assertTrue(replayed.analysisReplayed(),
                         "a new comparison must find the stored analysis, or this test " //$NON-NLS-1$
                                 + "compares two cold runs and asserts nothing about replay"); //$NON-NLS-1$
@@ -197,6 +203,11 @@ class MigrationScriptParityTest {
                                 + "from disk or computed again"); //$NON-NLS-1$
             }
         }
+    }
+
+    private static void assertNoComparisonReferences(PipelineRun run) {
+        assertEquals(0, run.projectReferences());
+        assertEquals(0, run.remoteReferences());
     }
 
     /**

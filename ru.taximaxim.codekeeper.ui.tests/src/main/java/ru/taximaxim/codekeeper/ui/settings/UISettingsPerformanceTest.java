@@ -73,7 +73,7 @@ class UISettingsPerformanceTest {
                 settings.getParserExecutionPolicy().maxPending());
         assertEquals(64L << 20, settings.getParserExecutionPolicy().maxPendingBytes());
         assertTrue(settings.isReadAuthors());
-        assertTrue(settings.isCollectObjectReferences());
+        assertFalse(settings.isCollectObjectReferences());
     }
 
     @Test
@@ -135,6 +135,7 @@ class UISettingsPerformanceTest {
         assertEquals(CACHE_ROOT.toString(), settings.getPgCatalogCacheDir());
         assertEquals(ParserWorkerDefaults.defaultWorkers(),
                 settings.getParserExecutionPolicy().workers());
+        assertFalse(settings.isCollectObjectReferences());
     }
 
     @Test
@@ -157,6 +158,7 @@ class UISettingsPerformanceTest {
             assertNull(settings.getPgCatalogCacheDir());
             assertFalse(settings.requiresComparisonLoaderFactories());
             assertTrue(settings.getParserExecutionPolicy().shared());
+            assertTrue(settings.isCollectObjectReferences());
         }
     }
 
@@ -220,6 +222,8 @@ class UISettingsPerformanceTest {
             assertDedicatedPolicy(getChangesCopy, 6, 12);
             assertDedicatedPolicy(projectIndex, 5, 10);
             assertDedicatedPolicy(projectIndexCopy, 5, 10);
+            assertFalse(getChangesCopy.isCollectObjectReferences());
+            assertTrue(projectIndexCopy.isCollectObjectReferences());
             assertDedicatedPolicy(createPgSettings(true, false), 3, 6);
             assertDedicatedPolicy(UISettings.forProjectIndex(
                     null, Map.of(), DatabaseType.PG), 4, 8);

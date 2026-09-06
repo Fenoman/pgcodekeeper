@@ -99,6 +99,7 @@ public final class UISettings extends AbstractSettings {
     private final String timeZone;
     private String inCharsetName = Consts.UTF_8;
     private int jdbcFetchSize;
+    private boolean collectObjectReferences = true;
 
     private final IProject project;
     private final DatabaseType dbType;
@@ -146,6 +147,7 @@ public final class UISettings extends AbstractSettings {
         this.timeZone = source.timeZone;
         this.inCharsetName = source.inCharsetName;
         this.jdbcFetchSize = source.jdbcFetchSize;
+        this.collectObjectReferences = source.collectObjectReferences;
         this.preferenceSnapshot = source.preferenceSnapshot;
         this.formatConfiguration = source.formatConfiguration.copy();
         this.preFilePaths = source.preFilePaths;
@@ -281,6 +283,9 @@ public final class UISettings extends AbstractSettings {
             return;
         }
 
+        // Comparison uses semantic dependencies, while editor navigation has
+        // its own project index and reference locations.
+        collectObjectReferences = false;
         setParserExecutionPolicy(
                 ParserExecutionPolicy.dedicated(
                         ParserWorkerPreferences.getChangesWorkers()));
@@ -444,6 +449,11 @@ public final class UISettings extends AbstractSettings {
     @Override
     public int getJdbcFetchSize() {
         return jdbcFetchSize;
+    }
+
+    @Override
+    public boolean isCollectObjectReferences() {
+        return collectObjectReferences;
     }
 
     @Override

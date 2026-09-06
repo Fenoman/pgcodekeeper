@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- PostgreSQL `Get changes` reduces memory use by omitting reference-location maps from comparison models. Dependency analysis, migration scripts and the SQL editor's navigation index are preserved.
+
 ## [15.3.0-neo1] - 2026-08-31
 
 ### Added

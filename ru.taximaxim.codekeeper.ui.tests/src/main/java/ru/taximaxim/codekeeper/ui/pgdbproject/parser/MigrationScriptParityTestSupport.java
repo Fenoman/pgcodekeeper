@@ -17,7 +17,9 @@ package ru.taximaxim.codekeeper.ui.pgdbproject.parser;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.Map;
 import java.util.stream.Stream;
 
 import org.eclipse.core.resources.IProject;
@@ -29,15 +31,17 @@ import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.jobs.Job;
 import org.pgcodekeeper.core.database.api.loader.ComparisonLoaderFactories;
 import org.pgcodekeeper.core.database.api.loader.ILoaderFactory;
+import org.pgcodekeeper.core.database.api.schema.IDatabase;
 import org.pgcodekeeper.core.database.base.loader.LoaderFactories;
 import org.pgcodekeeper.core.database.pg.PgDatabaseProvider;
 import org.pgcodekeeper.core.model.difftree.TreeElement;
-import org.pgcodekeeper.core.settings.CoreSettings;
 
 import ru.taximaxim.codekeeper.ui.DatabaseType;
+import ru.taximaxim.codekeeper.ui.UIConsts.PREF;
 import ru.taximaxim.codekeeper.ui.differ.Differ;
 import ru.taximaxim.codekeeper.ui.libraries.LibraryUtils;
 import ru.taximaxim.codekeeper.ui.localizations.Messages;
+import ru.taximaxim.codekeeper.ui.settings.UISettings;
 import ru.taximaxim.codekeeper.ui.utils.UIMonitor;
 
 /**
@@ -96,8 +100,11 @@ final class MigrationScriptParityTestSupport {
      * @param script           the migration script built from that comparison
      * @param reused           whether a retained analyzed model served this run
      * @param analysisReplayed whether a stored analysis result served this run
+     * @param projectReferences retained reference locations in the project model
+     * @param remoteReferences retained reference locations in the remote model
      */
-    record PipelineRun(String script, boolean reused, boolean analysisReplayed) {
+    record PipelineRun(String script, boolean reused, boolean analysisReplayed,
+            long projectReferences, long remoteReferences) {
     }
 
     /**
@@ -149,12 +156,14 @@ final class MigrationScriptParityTestSupport {
         PipelineRun pipelineScript(ReusableProjectComparison reusable)
                 throws Exception {
             var prepared = reusable.load(project, DatabaseType.PG, provider,
-                    projectRoot, remoteFactory(), scriptSafeSettings(monitor),
+                    projectRoot, remoteFactory(), scriptSafeSettings(project, monitor),
                     "project", "remote", monitor, false) //$NON-NLS-1$ //$NON-NLS-2$
                     .orElseThrow();
             String script = script(prepared.result(), monitor);
             var run = new PipelineRun(script, prepared.reused(),
-                    prepared.analysisReplayed());
+                    prepared.analysisReplayed(),
+                    referenceCount(prepared.result().oldLoader().getDatabase()),
+                    referenceCount(prepared.result().newLoader().getDatabase()));
             var lease = prepared.publish().displayLease();
             if (lease.isPresent()) {
                 try (var held = lease.orElseThrow()) {
@@ -181,7 +190,7 @@ final class MigrationScriptParityTestSupport {
                                     LibraryUtils.META_PATH)),
                     remoteFactory());
             var models = UIComparisonLoader.loadModels(factories,
-                    scriptSafeSettings(monitor));
+                    scriptSafeSettings(project, monitor));
             return script(UIComparisonLoader.createResult(models,
                     "project", "remote"), monitor); //$NON-NLS-1$ //$NON-NLS-2$
         }
@@ -297,13 +306,19 @@ final class MigrationScriptParityTestSupport {
      * sets. Asserting parity under those settings would assert it in the one
      * configuration where the behaviour under test does not exist.
      */
-    static CoreSettings scriptSafeSettings(IProgressMonitor monitor) {
-        var settings = new CoreSettings();
-        settings.setPgRoutineBodyHashFirst(true);
-        settings.setPgRoutineBodySkipMatchedAnalysis(false);
-        settings.setTimeZone("UTC"); //$NON-NLS-1$
+    static UISettings scriptSafeSettings(IProject project, IProgressMonitor monitor) {
+        var settings = UISettings.forGetChanges(project, Map.of(
+                PREF.PARALLEL_LOADING, true,
+                PREF.PG_ROUTINE_BODY_SKIP_MATCHED_ANALYSIS, false,
+                PREF.PG_CATALOG_CACHE_ROWS, false,
+                PREF.ENABLE_BODY_DEPENDENCIES, true,
+                PREF.NO_PRIVILEGES, false), DatabaseType.PG);
         settings.setMonitor(new UIMonitor(monitor));
         return settings;
+    }
+
+    private static long referenceCount(IDatabase database) {
+        return database.getObjReferences().values().stream().mapToLong(Collection::size).sum();
     }
 
     /**
