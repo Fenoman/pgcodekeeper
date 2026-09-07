@@ -7,11 +7,24 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+### Changed
+
+### Fixed
+
+## [15.3.0-neo2] - 2026-09-07
+
 ### Changed
 
 - Repeated PostgreSQL `Get changes` reuses the structural model of an unchanged project to reduce CPU work. Every SQL file is checked by content, including external edits preserving file size and modification time. Project, settings or comparison-depth changes require a fresh load; the database is loaded on every run.
 - The first structural project comparison validates consumed files while the database is still loading. File hashing reuses one buffer per pass to reduce temporary allocations; final file-set and project-change checks still run after both sides finish.
 - PostgreSQL `Get changes` reduces memory use by omitting reference-location maps from comparison models. Dependency analysis, migration scripts and the SQL editor's navigation index are preserved.
+- Updated Core to `15.3.0-neo2`, including concurrent preparation of catalog worker connections, snapshot reuse for cached indexes and triggers, smaller column-option payloads and fewer temporary allocations when decoding cached strings.
+
+### Fixed
+
+- Updated the SWTBot editor test for the full-analysis prompt: it checks that full analysis is available and verifies cancellation without creating a migration folder.
 
 ## [15.3.0-neo1] - 2026-08-31
 

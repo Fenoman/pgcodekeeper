@@ -11,6 +11,6 @@
   
     <groupId>ru.taximaxim.codeKeeper</groupId>
     <artifactId>ru.taximaxim.codekeeper.feature</artifactId>
-    <version>15.3.0.neo1</version>
+    <version>15.3.0.neo2</version>
     <packaging>eclipse-feature</packaging>
 </project>

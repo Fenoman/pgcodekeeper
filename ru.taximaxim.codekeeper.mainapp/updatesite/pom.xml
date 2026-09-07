@@ -14,7 +14,7 @@
     <groupId>ru.taximaxim.codeKeeper</groupId>
     <artifactId>ru.taximaxim.codekeeper.updatesite</artifactId>
     <!-- eclipse-repository versions must be valid OSGi versions. -->
-    <version>15.3.0.neo1</version>
+    <version>15.3.0.neo2</version>
     <packaging>eclipse-repository</packaging>
 
     <build>

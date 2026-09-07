@@ -2,7 +2,7 @@
 <feature
       id="ru.taximaxim.codekeeper.feature"
       label="%feature.label"
-      version="15.3.0.neo1"
+      version="15.3.0.neo2"
       provider-name="%feature.provider-name"
       plugin="ru.taximaxim.codekeeper.mainapp">
 
@@ -66,7 +66,7 @@
 
    <plugin
          id="org.pgcodekeeper.core"
-         version="15.3.0.neo1"/>
+         version="15.3.0.neo2"/>
 
    <plugin
          id="lz4-java"

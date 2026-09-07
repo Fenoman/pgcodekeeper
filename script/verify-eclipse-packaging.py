@@ -55,8 +55,8 @@ def core_pin():
 
 MAVEN_VERSION, OSGI_VERSION = release_identity()
 REACTOR_MAVEN_VERSION = MAVEN_VERSION if MAVEN_VERSION.endswith("-SNAPSHOT") else OSGI_VERSION
-CORE_MAVEN_VERSION = "15.3.0-neo1"
-CORE_OSGI_VERSION = "15.3.0.neo1"
+CORE_MAVEN_VERSION = "15.3.0-neo2"
+CORE_OSGI_VERSION = "15.3.0.neo2"
 ECLIPSE_REPO = "https://download.eclipse.org/releases/2026-06"
 JUSTJ_REPO = "https://download.eclipse.org/justj/jres/21/updates/release/21.0.11"
 CORE_REPOSITORY = "Fenoman/pgcodekeeper-core"

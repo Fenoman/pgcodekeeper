@@ -27,7 +27,7 @@ import ru.taximaxim.codekeeper.ui.dbstore.DbInfo;
 
 class CoreApplicationVersionTest {
 
-    private static final String CORE_VERSION = "15.3.0-neo1"; //$NON-NLS-1$
+    private static final String CORE_VERSION = "15.3.0-neo2"; //$NON-NLS-1$
 
     @Test
     void packagedCoreVersionReachesPostgreSqlApplicationName() {
