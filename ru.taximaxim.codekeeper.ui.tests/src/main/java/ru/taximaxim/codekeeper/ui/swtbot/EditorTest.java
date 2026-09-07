@@ -24,6 +24,7 @@ import java.net.URISyntaxException;
 import java.util.Map;
 import java.util.function.IntPredicate;
 
+import org.eclipse.jface.dialogs.IDialogConstants;
 import org.eclipse.swtbot.swt.finder.waits.Conditions;
 import org.eclipse.swtbot.swt.finder.waits.DefaultCondition;
 import org.eclipse.swtbot.swt.finder.widgets.SWTBotShell;
@@ -38,7 +39,7 @@ import ru.taximaxim.codekeeper.ui.swtbot.utils.IBotProvider;
 
 public class EditorTest extends AbstractSwtBotTest {
 
-    // The optimized PG path blocks GUI migration generation and does not create its folder.
+    // Cancelling the full-analysis prompt leaves the PG migration folder absent.
     private static final Map<DatabaseType, Integer> EXPECTED_NODES_SIZE = Map.of(
             DatabaseType.PG, 6,
             DatabaseType.MS, 10,
@@ -104,7 +105,8 @@ public class EditorTest extends AbstractSwtBotTest {
         if (DatabaseType.PG == dbType) {
             SWTBotShell warning = BOT.shell(Messages.ProjectEditorDiffer_incomplete_routine_analysis_title);
             warning.activate();
-            warning.bot().button("OK").click();
+            assertTrue(warning.bot().button(Messages.ProjectEditorDiffer_recompute_full_analysis).isEnabled());
+            warning.bot().button(IDialogConstants.CANCEL_LABEL).click();
             BOT.waitUntil(Conditions.shellCloses(warning));
         } else {
             checkMigrationScript(migrationName);
